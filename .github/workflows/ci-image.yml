@@ -1,14 +1,9 @@
 name: Build CI Image
 on:
-  # Rebuild weekly (Monday 4am UTC) to pick up CLI updates — deliberately 2h
-  # BEFORE evals-periodic's 6am cron so the weekly eval run finds a fresh
-  # image instead of racing a half-pushed tag or duplicating the build.
+  # Rebuild weekly (Monday 6am UTC) to pick up CLI updates
   schedule:
-    - cron: '0 4 * * 1'
-  # Rebuild on Dockerfile or lockfile changes. package.json is deliberately
-  # NOT a trigger: the tag hash below excludes it (its version field bumps on
-  # every ship), so a package.json-triggered run rebuilt and re-pushed the
-  # IDENTICAL tag on every merge to main (~2m26s each for zero content change).
+    - cron: '0 6 * * 1'
+  # Rebuild on Dockerfile or lockfile changes
   push:
     branches: [main]
     paths:
@@ -16,12 +11,6 @@ on:
       - 'package.json'
   # Manual trigger
   workflow_dispatch:
-
-# Two rapid main pushes must not race pushing the same :latest/:buildcache
-# tags; newest wins.
-concurrency:
-  group: ci-image-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   build:

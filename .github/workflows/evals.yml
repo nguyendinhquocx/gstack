@@ -10,7 +10,6 @@ concurrency:
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}/ci
-  EVALS_TIER: gate
 
 jobs:
   # Build Docker image with pre-baked toolchain (cached — only rebuilds on Dockerfile/lockfile change)

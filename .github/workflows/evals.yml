@@ -21,7 +21,6 @@ jobs:
       packages: write
     outputs:
       image-tag: ${{ steps.meta.outputs.tag }}
-      runtime-id: ${{ steps.runtime.outputs.id }}
     steps:
       - uses: actions/checkout@v4
 
@@ -199,8 +198,6 @@ jobs:
             [ "$F" -gt 0 ] && STATUS_ICON="❌"
             SUITE_LINES="${SUITE_LINES}| ${TIER} | ${P}/${T} | ${STATUS_ICON} | \$${C} |\n"
           done
-
-          COVERAGE=$(jq -r '"Profile: \(.profile // "full") / \(.prCoverage.mode // "broad"); selected behaviors: \(.selection.e2e | if . == null then "all" else length end), judges: \(.selection.judges | if . == null then "all" else length end). Deferred to scheduled/release coverage: \(.prCoverage.deferred // [] | length) behaviors and \(.prCoverage.deferredPromptFiles // [] | length) changed prompt files. Deferred checks did not run and receive no PR-pass credit."' /tmp/paid-report/manifest.json) || COVERAGE='Coverage manifest unavailable; no coverage claim.'
 
           STATUS="✅ PASS"
           [ "$FAILED" -gt 0 ] && STATUS="❌ FAIL"

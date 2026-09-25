@@ -179,6 +179,34 @@ jobs:
 
           TOTAL=0; PASSED=0; FAILED=0; COST="0"
           SUITE_LINES=""
+          VERIFIED=/tmp/verdict/paid-report/collector-outcomes.json
+          if ! jq -e '
+            . as $summary |
+            .version == 1 and (.files | type == "array") and (.totals | type == "object") and
+            ([.files[] | .total == (.passed + .failed + .manual_accepted) and
+              (.total == (.executed + .reused)) and
+              ([.total,.passed,.failed,.manual_accepted,.executed,.reused,.attempts,.flaky] | all(. >= 0 and (floor == .))) ] | all) and
+            (.totals | .total == (.passed + .failed + .manual_accepted) and .total == (.executed + .reused)) and
+            (["total","passed","failed","manual_accepted","executed","reused","attempts","flaky"] |
+              all(. as $key | ([$summary.files[] | .[$key]] | add // 0) == $summary.totals[$key]))
+          ' "$VERIFIED" >/dev/null 2>&1; then
+            VERIFIED=""
+            echo 'Verified collector summary unavailable; manual acceptance is unavailable/unverified.'
+          fi
+          if [ -n "$VERIFIED" ]; then
+            while IFS=$'\t' read -r f T P F M FL EX RE _ATTEMPTS C TIER SHARD; do
+              [ "$T" -eq 0 ] && continue
+              TOTAL=$((TOTAL + T)); PASSED=$((PASSED + P)); FAILED=$((FAILED + F))
+              MANUAL=$((MANUAL + M)); FLAKY=$((FLAKY + FL))
+              EXECUTED=$((EXECUTED + EX)); REUSED=$((REUSED + RE))
+              COST=$(echo "$COST + $C" | bc)
+              STATUS_ICON="✅"
+              [ "$M" -gt 0 ] && STATUS_ICON="⚠ manual/unscored"
+              [ "$F" -gt 0 ] && STATUS_ICON="❌"
+              [ "$F" -eq 0 ] && [ "$M" -eq 0 ] && [ "$FL" -gt 0 ] && STATUS_ICON="✅⚠"
+              SUITE_LINES="${SUITE_LINES}| ${TIER}/${SHARD} | ${P}/${T} | ${M} | ${EX} | ${RE} | ${STATUS_ICON} | \$${C} |\n"
+            done < <(jq -r '.files[] | [.file,.total,.passed,.failed,.manual_accepted,.flaky,.executed,.reused,.attempts,.cost,.tier,.shard] | @tsv' "$VERIFIED")
+          else
           for f in $RESULTS; do
             if ! jq -e '.total_tests' "$f" >/dev/null 2>&1; then
               echo "Skipping malformed JSON: $f"
@@ -198,6 +226,7 @@ jobs:
             [ "$F" -gt 0 ] && STATUS_ICON="❌"
             SUITE_LINES="${SUITE_LINES}| ${TIER} | ${P}/${T} | ${STATUS_ICON} | \$${C} |\n"
           done
+          fi
 
           STATUS="✅ PASS"
           [ "$FAILED" -gt 0 ] && STATUS="❌ FAIL"

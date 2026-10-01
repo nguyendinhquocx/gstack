@@ -209,6 +209,7 @@ jobs:
           | Suite | Result | Status | Cost |
           |-------|--------|--------|------|
           $(echo -e "$SUITE_LINES")
+          </details>
 
           ---
           *12x ubicloud-standard-2 (Docker: pre-baked toolchain + deps) | wall clock ≈ slowest suite*"
@@ -224,8 +225,10 @@ jobs:
             done
             BODY="${BODY}
 
-          ### Failures
-          $(echo -e "$FAILURES")"
+          ### Failures and split verdicts
+          \`\`\`
+          ${FAILURES}
+          \`\`\`"
           fi
 
           # Update existing comment or create new one

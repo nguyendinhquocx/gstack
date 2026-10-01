@@ -3,9 +3,16 @@ on:
   schedule:
     - cron: '0 6 * * 1'  # Monday 6 AM UTC
   workflow_dispatch:
+    inputs:
+      redispatch_of:
+        description: 'Run id this run re-dispatches (the one INFRA/INCOMPLETE-only re-dispatch; set by the report job)'
+        type: string
+        default: ''
 
+# A re-dispatch runs in its own group so it never cancels the run that
+# dispatched it; both runs are reported.
 concurrency:
-  group: evals-periodic
+  group: evals-periodic${{ inputs.redispatch_of && format('-redispatch-{0}', inputs.redispatch_of) || '' }}
   cancel-in-progress: true
 
 env:

@@ -1,5 +1,92 @@
 # Changelog
 
+## [1.91.16.0] - 2026-10-03
+
+**Installing or upgrading gstack never quietly changes another copy, and `./setup --status` shows every install.**
+**Skills start in worktree-isolated Claude Code sessions, and a review that didn't run says so.**
+
+This release makes three promises hold and backs each with tests. Upgrades used to refresh only Claude Code, so Codex and OpenCode installs drifted for months, and a failed refresh could leave `~/.codex/skills/gstack` empty. Claude Code sessions isolated to a worktree refused every skill's start command. /cso said "No supported findings" when it had assessed nothing, and Codex calls ignored the model you configured.
+
+### What changes for you
+
+- **See every install.** `./setup --status` prints one row per install: host, tier, scope, source, version. Setup and `/gstack-upgrade` end with the same rows and say which host failed and how to retry. Nothing is written by `--status`.
+- **Upgrades refresh every registered host**, each in its own process. A failed host keeps its previous working install. `--host codex` no longer touches Claude's hooks, and a second checkout no longer silently repoints the global Claude link (use `--global` on purpose).
+- **Setup rejects unknown options** before writing anything and suggests the right one. Bare `./setup` installs for Claude Code; use `--host auto` to detect every agent.
+- **Host tiers.** Every host declares a support tier: Claude is `full`; Codex, Kiro, Factory, OpenCode, Cursor and the new GitHub Copilot CLI host are `experimental`; Slate, OpenClaw, Hermes and GBrain are `instruction-only`. On hosts without hooks, /careful, /freeze and /guard say "advisory, not blocked".
+- **GitHub Copilot CLI:** `./setup --host copilot` installs to `~/.copilot/skills` (experimental).
+- **Turn off skills you don't use:** `gstack-config set disabled_skills make-pdf,pair-agent`. Typos get the closest name, `""` re-enables everything, and the setting survives upgrades.
+- **Worktree-isolated sessions start skills.** The start command is one literal line, context recovery moved into `gstack-context-recovery`, and skill blocks no longer `eval` gstack helpers. Installs in renamed folders, project-vendored copies, `CLAUDE_CONFIG_DIR` and `CODEX_HOME` get their own rendered skills that point at the right root; paths with spaces get a space-free alias.
+- **Codex uses your model.** Order: a model named for the request, `GSTACK_CODEX_MODEL`, your Codex `config.toml` (`review_model` first for native review), then `gpt-6-astra`. gstack prints `CODEX_MODEL: … (source: …)` before any paid call and stops with a repair message when the choice is invalid. Outside voices state their own timeout (at most 10 minutes) and are no longer cut off at 2 or 5 minutes.
+- **/cso tells the truth.** A report where nothing was assessed reads "not assessed" with what ran, what's missing, why and the next step. On Windows and macOS a lease whose process ID now belongs to an unrelated process is reclaimed; one unreadable lease left by an older gstack no longer blocks `start`.
+- **make-pdf `--toc`** prints real page numbers and its links survive empty headings and reused ids. If the numbers can't be verified, it exits 3 instead of printing empty cells.
+- **Design images keep working after OpenAI retires `gpt-image-1` on Oct 23.** The design binary uses `gpt-5.5` with image generation pinned to `gpt-image-2`; `GSTACK_DESIGN_MODEL` overrides it, and `bun run design/scripts/live-model-check.ts` checks a key against the defaults.
+- **Upgrade:** run `/gstack-upgrade`, then `./setup --status` to confirm each host, and start a new agent session.
+
+### Itemized changes
+
+#### Fixed
+- Upgrades refresh only Claude Code; Codex and OpenCode installs drift (#1925). A project-vendored setup's earlier capture of the machine-wide Codex namespace is reported by `--status` (#2879). `--host codex` exposed changes to Claude (#2347); `~/.Codex` paths (#2338).
+- Host refreshes copied over the live install, so a failure emptied it; runtime and skill directories are now staged and swapped, including on Windows. Migrations advance only past those that succeeded.
+- Worktree-isolated Claude Code sessions refused every skill's start preamble (#2763). Install dirs not named `gstack` broke skill paths (#1882). Claude Code rewrote `$1`-style tokens in skill bodies (#2896). The plan-mode preamble claimed skill precedence over host restrictions (#2851).
+- OpenCode command files and question tool (#2629, #2626); Hermes frontmatter names and question tool (#2825, #2015); /cso on Codex reported its launcher missing (#2906).
+- Codex model selection ignored your configuration (#2914). Outside-voice timeouts killed Codex early or exceeded the tool limit (#2776). The probe cached success after the binary or auth changed (#2787). Unguarded `mktemp` handed Codex empty paths (#2881). Nested Codex reviews saw gstack's installed skills (#2847).
+- /cso on Windows bricked later runs after a dead or unreadable lease (#2894). /cso reported "No supported findings" for an unassessed scope. The redaction guard flagged `api_key=os.environ[...]` as a secret (#2912).
+- Browse on Windows: EEXIST on an existing `.gstack` (#2048); the terminal agent died with the CLI console (#2637). Windows pre-push guard path regression test (#2805).
+- make-pdf TOC page numbers were empty and anchors shifted (#2903). Design commands hardcoded `gpt-4o` and sent `max_tokens` (#2807).
+- Free tests wrote to the developer's real `~/.gstack` (#2895), left browse daemons running (#2816), called a real `gbrain` on PATH (#2829), and failed on macOS's symlinked temp root (#2841, #2982, #2911, #2909, #2908, #2910).
+
+#### Added
+- `./setup --status`, the install registry (`$GSTACK_STATE_ROOT/installs.tsv`), host tiers and capabilities, and a host conformance test that runs real setup for every installable host.
+- GitHub Copilot CLI host (#393), selectively ported from #2323 by @andrey-esipov with earlier work by @ridermw and @lolisaigao1234.
+- `disabled_skills` config (#1206).
+- OpenSSF Scorecard workflow (#1997) and a macOS named-regressions CI job.
+
+#### Changed
+- Every GitHub Action is pinned to a commit SHA, enforced by a test (#1948). The CI image installs Bun from a SHA-256-verified archive (#1706) and carries a pinned Codex CLI that only Codex eval cases can reach.
+- CLAUDE.md is under Claude Code's 40,000-character warning (#2096).
+
+## [1.91.15.0] - 2026-10-03
+
+**Skills read cleanly on Opus 5.5: stale facts fixed, shouting turned down, and the tests that locked the shouting in now check behavior.**
+**gbrain ingests coding-agent transcripts only after you say yes.**
+
+We ran Anthropic's `/claude-api prompt-audit` (target `claude-opus-5-5`) over every skill template, resolver, model overlay, CLAUDE.md and the code that builds model requests. Then we swept the tests that pin skill wording. gstack had almost none of the old "think step by step" scaffolding. What it did have was instructions that pointed at the wrong file or command, CRITICAL/MUST stacks that current models over-apply, arithmetic the model was asked to compute, and issue numbers it can't use. Those are fixed or rewritten at normal volume, with every real rule and its reason kept. A safety rule only changed wording where an eval shows the model still obeys it.
+
+### What changes for you
+
+- **Transcripts need your consent.** `/sync-gbrain` and the gbrain sync skip Claude Code and Codex session transcripts until `transcript_ingest_mode` is `recent` (last 90 days) or `all`. If you never chose, the sync prints one line saying how. Other memory keeps syncing. Choose with `/sync-gbrain` or `gstack-config set transcript_ingest_mode recent|all|off`. Older stored answers (letters, `incremental`) get asked again. Staged transcript pages wait on disk until you consent.
+- **`proactive=false` means no suggestions at all**, including "want me to run /X?". `gstack-config set proactive true` restores them.
+- **Model overlays:** Opus 5.5, Sonnet 5.5 and other point releases use the generic Claude overlay. The Opus 4.7, Opus 4.8 and Sonnet 5 overlays apply only to those exact models (bare ID, dated snapshot or `-latest`). `--model <family>` forces one.
+- **open-gstack-browser asks before replacing a live browser** instead of killing it, and leaves it running when nobody can answer.
+- **setup-gbrain no longer writes its own CLAUDE.md search block**; `/sync-gbrain` is the one writer.
+- **Upgrade:** run `/gstack-upgrade`, then start a new session.
+
+### Itemized changes
+
+#### Fixed
+- Skill instructions that contradicted the code. Examples: the router's empty telemetry session ID; the design board flow that waited on a command that now exits; an unexpanded `$_DESIGN_DIR` in the reload call; wrong Pretext API signatures in /design-html; a /make-pdf flag that doesn't exist; /land-and-deploy falling back to bare `bun test` and reading only the legacy eval store; stale /ship step numbers; hardcoded `main`/`origin/main`; "Mac only" claims the installer contradicts; tab-state fields the terminal agent misnamed; spec flags that aren't flags; autoplan skipping renamed sections.
+- The shared test bootstrap undoes only the changes it made, instead of a blanket `git checkout`.
+- Skills that read or wrote a literal `~/.gstack` path now use your configured state root (`GSTACK_STATE_ROOT` / `GSTACK_HOME`): canary and health history, plan-tune gates and proposals, retro reads, ship ledgers, the telemetry sink and gbrain context queries. Custom state directories no longer miss data.
+- The browse untrusted-content warning names both marker formats the binary prints.
+- The "never ingest transcripts" choice is enforced in code, not just described.
+- /plan-tune describes the never-ask hook accurately.
+- Seven conflicts between instruction files are settled:
+  - `PROACTIVE=false` means no suggestions, not even an offer.
+  - /sync-gbrain alone writes the CLAUDE.md search block.
+  - /ship uses the checklist's critical categories.
+  - /plan-design-review runs Step 0 before mockups.
+  - DX triage keeps every pass and reports blockers only.
+  - When a DESIGN.md exists, it decides what /design-shotgun varies.
+  - ETHOS.md describes how its principles actually reach skills.
+
+#### Changed
+- **Normal-volume instructions.** CRITICAL / IRON LAW / MUST stacks, thoroughness boosters, fixed progress cadences and model-computed point scores are rewritten as plain rules and stop conditions. Incident and issue numbers move out of runtime prose. The /document-release CHANGELOG-preservation and VERSION-ask rules changed wording only after the document-release eval passed on both the old and new text. Rules without such an eval keep their wording (listed in TODOS.md).
+- **Tests check behavior, not sentences.** Prose-pinning test files keep step order, routing tables, safety lines (matched on meaning) and the markers software reads, and drop exact-sentence pins. Each conversion was checked by a scripted mutation pass: reordering a step, deleting a marker or deleting a safety line turns the test red, while rewording dropped prose leaves it green.
+- **Evals measure the skill instead of coaching it.** The document-release eval no longer tells the agent the answer. The routing evals use the routing text gstack ships. The graders check outcomes rather than exact phrases or emoji. The dedicated-tools overlay case passes on correct output plus at least 20% fewer Bash calls (contract v3).
+- Six paid cases that only had a model summarize SKILL.md are retired, along with duplicate checks. office-hours-auto-mode joins the fast PR profile.
+- New `test/instruction-facts.test.ts` keeps CLAUDE.md facts, /ship step references and state-root paths in step with the code. A config-key tripwire fails when a config key has no reader.
+- CLAUDE.md defines when prompt bytes are a test contract in this repo: when software reads them, or when a recorded eval shows the wording matters.
+
 ## [1.91.13.0] - 2026-10-02
 
 **/autoplan runs again for anyone with a SessionStart hook, and /land-and-deploy never merges over red CI.**

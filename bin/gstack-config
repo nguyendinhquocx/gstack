@@ -67,6 +67,8 @@ CONFIG_HEADER='# gstack configuration — edit freely, changes take effect on ne
 # ─── Skill naming ────────────────────────────────────────────────────
 # skill_prefix: false       # true = namespace skills as /gstack-qa, /gstack-ship
 #                           # false = short names /qa, /ship
+# disabled_skills:          # comma-separated skills to leave unregistered,
+#                           # e.g. make-pdf,pair-agent ("" = all enabled)
 #
 # ─── Writing style (V1) ──────────────────────────────────────────────
 # explain_level: default    # default = jargon-glossed, outcome-framed prose
@@ -88,6 +90,20 @@ CONFIG_HEADER='# gstack configuration — edit freely, changes take effect on ne
 # artifacts_sync_mode_prompted: false
 #                           # Set to true once the privacy gate has asked the user.
 #                           # Flip back to false to be re-prompted.
+#
+# ─── Transcript ingest (gbrain memory) ───────────────────────────────
+# transcript_ingest_mode: off  # recent | all | off — consent for /sync-gbrain
+#                           #   to ingest Claude Code and Codex session
+#                           #   transcripts (every project repo policy allows)
+#                           #   into your brain (local or Supabase).
+#                           #   recent — last 90 days
+#                           #   all    — all history
+#                           #   off    — never (other memory still syncs)
+#                           # Absent, legacy (A-E, incremental) or unknown
+#                           # values are not consent: transcripts are skipped
+#                           # and /sync-gbrain asks once. An invalid value is
+#                           # REJECTED and the stored value kept.
+#                           # Docs: setup-gbrain/memory.md#transcripts
 #
 # ─── Timeline Stop hook ──────────────────────────────────────────────
 # timeline_stop_hook: yes   # Controls whether ./setup registers the timeline
@@ -195,7 +211,7 @@ lookup_default() {
     # the callers already assume in their own `|| echo "<default>"` fallback.
     question_tuning) echo "false" ;;
     team_mode) echo "false" ;;
-    transcript_ingest_mode) echo "off" ;;
+    transcript_ingest_mode) echo "off" ;; # recent | all | off — transcript consent; absent = not consented (use `has`)
     # repo_mode: EMPTY is load-bearing — gstack-repo-mode treats any non-empty
     # answer as a user override and skips its own classification entirely, so
     # a synthesized "unknown" default turns the classifier into dead code.
@@ -390,7 +406,24 @@ case "${1:-}" in
     ;;
   set)
     KEY="${2:?Usage: gstack-config set <key> <value>}"
-    VALUE="${3:?Usage: gstack-config set <key> <value>}"
+    if [ "$#" -lt 3 ]; then
+      echo "Usage: gstack-config set <key> <value>" >&2
+      exit 1
+    fi
+    VALUE="$3"
+    # A config value is one non-empty line (disabled_skills may be empty: it
+    # clears the list). Reject rather than truncate, so a bad value never
+    # replaces the stored one.
+    if [ -z "$VALUE" ] && [ "$KEY" != "disabled_skills" ]; then
+      echo "Error: $KEY value is empty. Existing value left unchanged." >&2
+      exit 1
+    fi
+    case "$VALUE" in
+      *$'\n'*)
+        echo "Error: $KEY value contains a newline. Existing value left unchanged." >&2
+        exit 1
+        ;;
+    esac
     # Validate key (alphanumeric + underscore + optional @<endpoint-id> suffix).
     # Accepts hex hashes and the literal "local" from endpoint_hash.
     if ! printf '%s' "$KEY" | LC_ALL=C grep -qE '^[a-zA-Z0-9_]+(@[a-zA-Z0-9]+)?$'; then
@@ -467,6 +500,12 @@ case "${1:-}" in
       echo "Error: cross_project_learnings '$VALUE' not recognized. Valid values: true, false. Existing value left unchanged." >&2
       exit 1
     fi
+    # transcript_ingest_mode is a CONSENT key: recent/all let /sync-gbrain
+    # ingest coding-agent transcripts. Reject a typo; never coerce or store it.
+    if [ "$KEY" = "transcript_ingest_mode" ] && [ "$VALUE" != "recent" ] && [ "$VALUE" != "all" ] && [ "$VALUE" != "off" ]; then
+      echo "Error: transcript_ingest_mode '$VALUE' not recognized. Valid values: recent, all, off. Existing value left unchanged." >&2
+      exit 1
+    fi
     # memorable_recall is a CONSENT key: `on` lets a Claude Code hook hand every
     # prompt to a third-party binary. Reject like codex_reviews -- a typo must
     # never flip consent in either direction, so nothing is coerced or stored.
@@ -474,13 +513,72 @@ case "${1:-}" in
       echo "Error: memorable_recall '$VALUE' not recognized. Valid values: on, off. Existing value left unchanged." >&2
       exit 1
     fi
+    # disabled_skills (#1206): comma-separated skill names, one value for the
+    # key. Every name must be a real skill (typos get the closest name);
+    # gstack and gstack-upgrade can never be disabled; "" re-enables all.
+    # Rejected values leave the existing setting unchanged.
+    if [ "$KEY" = "disabled_skills" ]; then
+      _GSTACK_ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+      _known=" "
+      for _md in "$_GSTACK_ROOT_DIR"/*/SKILL.md.tmpl "$_GSTACK_ROOT_DIR"/*/SKILL.md; do
+        [ -f "$_md" ] || continue
+        _d="$(basename "$(dirname "$_md")")"
+        _n="$(sed -n '2,/^---$/ s/^name:[[:space:]]*//p' "$_md" | head -1 | tr -d '[:space:]')"
+        for _x in "$_d" "${_n:-$_d}"; do
+          case "$_known" in *" $_x "*) ;; *) _known="$_known$_x " ;; esac
+        done
+      done
+      _clean=""
+      for _x in $(printf '%s' "$VALUE" | tr ',' ' ' | tr -d "\"'"); do
+        _x="${_x#/}"
+        case "$_x" in
+          gstack|gstack-upgrade)
+            echo "Error: $_x cannot be disabled (it is how gstack upgrades and routes). Existing value left unchanged." >&2
+            exit 1 ;;
+        esac
+        _bare="${_x#gstack-}"
+        case "$_known" in
+          *" $_bare "*|*" $_x "*) ;;
+          *)
+            _best="$(for _k in $_known; do printf '%s\n' "$_k"; done | awk -v a="$_bare" '
+              function lev(s, t,   i, j, n, m, c, d, v) {
+                n = length(s); m = length(t)
+                for (i = 0; i <= n; i++) d[i, 0] = i
+                for (j = 0; j <= m; j++) d[0, j] = j
+                for (i = 1; i <= n; i++) for (j = 1; j <= m; j++) {
+                  c = (substr(s, i, 1) == substr(t, j, 1)) ? 0 : 1
+                  v = d[i-1, j] + 1; if (d[i, j-1] + 1 < v) v = d[i, j-1] + 1; if (d[i-1, j-1] + c < v) v = d[i-1, j-1] + c
+                  d[i, j] = v
+                }
+                return d[n, m]
+              }
+              { x = lev(a, $0); if (best == "" || x < bd) { bd = x; best = $0 } }
+              END { print best }')"
+            echo "Error: unknown skill '$_x' in disabled_skills. Did you mean '$_best'? Existing value left unchanged." >&2
+            exit 1 ;;
+        esac
+        case ",$_clean," in *",$_bare,"*) ;; *) _clean="${_clean:+$_clean,}$_bare" ;; esac
+      done
+      VALUE="$_clean"
+      for _x in $(printf '%s' "$_clean" | tr ',' ' '); do
+        for _tmpl in "$_GSTACK_ROOT_DIR"/*/SKILL.md.tmpl; do
+          [ -f "$_tmpl" ] || continue
+          _caller="$(basename "$(dirname "$_tmpl")")"
+          [ "$_caller" = "$_x" ] && continue
+          case ",$_clean," in *",$_caller,"*) continue ;; esac
+          if grep -qE "INVOKE_SKILL:$_x([^a-z-]|\$)|skills/gstack/$_x/(SKILL\.md|sections)" "$_tmpl" 2>/dev/null; then
+            echo "Warning: /$_caller uses /$_x. /$_x is no longer registered as a skill, but its files stay installed so /$_caller keeps working." >&2
+          fi
+        done
+      done
+    fi
     mkdir -p "$STATE_DIR"
     # Write annotated header on first creation
     if [ ! -f "$CONFIG_FILE" ]; then
       printf '%s' "$CONFIG_HEADER" > "$CONFIG_FILE"
     fi
-    # Drop embedded newlines, then escape sed replacement metacharacters.
-    SAFE_VALUE="$(printf '%s' "$VALUE" | head -1)"
+    # Escape sed replacement metacharacters (newlines were rejected above).
+    SAFE_VALUE="$VALUE"
     ESC_VALUE="$(printf '%s' "$SAFE_VALUE" | sed 's/[&/\]/\\&/g')"
     if grep -qE "^${KEY}:" "$CONFIG_FILE" 2>/dev/null; then
       # Portable in-place edit (BSD sed uses -i '', GNU sed uses -i without arg)
@@ -496,9 +594,17 @@ case "${1:-}" in
       echo "fix: GSTACK_STATE_ROOT='$_gstack_cfg_root' $_SELF set $KEY $SAFE_VALUE ($_STATE_DOC)" >&2
     fi
     # Auto-relink skills when prefix setting changes (skip during setup to avoid recursive call)
-    if [ "$KEY" = "skill_prefix" ] && [ -z "${GSTACK_SETUP_RUNNING:-}" ]; then
+    if { [ "$KEY" = "skill_prefix" ] || [ "$KEY" = "disabled_skills" ]; } && [ -z "${GSTACK_SETUP_RUNNING:-}" ]; then
       GSTACK_RELINK="$(dirname "$0")/gstack-relink"
-      [ -x "$GSTACK_RELINK" ] && "$GSTACK_RELINK" || true
+      if [ -x "$GSTACK_RELINK" ] && ! "$GSTACK_RELINK"; then
+        echo "gstack-config: $KEY saved, but relinking the installed skills failed (see above), so skill names may not match yet. Retry: $GSTACK_RELINK" >&2
+      fi
+      # gstack-relink covers Claude installs; every other registered host
+      # applies the change on its next setup run.
+      if [ "$KEY" = "disabled_skills" ] && [ -f "$(dirname "$0")/gstack-install-registry.sh" ]; then
+        ( GSTACK_STATE_ROOT="$STATE_DIR"; . "$(dirname "$0")/gstack-install-registry.sh"
+          gstack_install_registry_rows | awk -F '\t' '$1 != "claude" { print "  apply to " $1 " (" $4 "): cd " $6 " && ./setup --host " $1 }' )
+      fi
     fi
     ;;
   list)

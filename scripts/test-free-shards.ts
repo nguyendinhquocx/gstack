@@ -357,10 +357,10 @@ export const KNOWN_WINDOWS_INCOMPATIBLE: Array<{ file: string; reason: string }>
 // coverage, so auto-excluding them defeats the regression tests they carry.
 const KNOWN_WINDOWS_SAFE: Array<{ file: string; reason: string }> = [
   { file: 'test/ship-hook-windows-paths.test.ts', reason: 'runs bin/ helpers through explicit bash and Bun argv with forward-slash paths; never executes a shebang; the path-spelling simulation is skipIf win32' },
-  {
-    file: 'test/state-root-parity.test.ts',
-    reason: 'runs the bash twin and lib/state-root.ts over an env table with PATH empty; no shebang execution, raw-string comparison is platform-neutral',
-  },
+  { file: 'test/state-root-parity.test.ts', reason: 'runs the bash twin and lib/state-root.ts over an env table with PATH empty; no shebang execution, raw-string comparison is platform-neutral' },
+  { file: 'test/generator-eexist.test.ts',
+    reason: 'E4: runs the generators through Bun argv with the Windows EEXIST emulation preload; no shebang execution' },
+  { file: 'test/gstack-config-gbrain-refresh.test.ts', reason: 'E6: runs bin/gstack-config through explicit bash; its gbrain/python3 shims are found by bash PATH lookup, never launched by CreateProcess' },
   {
     file: 'test/qa-evidence.test.ts',
     reason: 'invokes the production helper through Bun argv and exercises native Windows job cleanup, private file captures and backpressured receipt output',
@@ -1432,7 +1432,7 @@ function trackShardBrowser(stateDir: string, env: NodeJS.ProcessEnv) {
   let alive = true;
 
   const check = (capture: Capture) => {
-    if (closed || capture.abort.signal.aborted || active !== capture) throw new CaptureStopped();
+    if (closed || capture.abort.signal.aborted || active !== capture || (!forced && performance.now() >= forceAt)) throw new CaptureStopped();
     if (performance.now() >= Math.min(capture.deadline, deadline)) throw new BrowserCleanupError('browser ownership deadline exceeded');
   };
   const probe = async (capture: Capture, command: string, args: string[], timeout: number) => {
@@ -1462,7 +1462,7 @@ function trackShardBrowser(stateDir: string, env: NodeJS.ProcessEnv) {
         killProcessGroup(child, 'SIGKILL');
         reaper = setTimeout(() => finish(null), 100);
       };
-      const timer = setTimeout(stop, Math.max(1, remaining));
+      const timer = setTimeout(() => { if (!closed) errors.add('browser identity probe did not complete'); stop(); }, Math.max(1, Math.min(remaining, forced ? Infinity : forceAt - performance.now())));
       capture.abort.signal.addEventListener('abort', stop, { once: true });
       child.once('error', () => { failed = true; finish(null); });
       child.once('close', finish);
@@ -1543,12 +1543,12 @@ function trackShardBrowser(stateDir: string, env: NodeJS.ProcessEnv) {
     }
     return true;
   };
-  const record = (file: string): any => {
+  const record = (file: string): any => { try { // a record a shutting-down daemon removes mid-read is absent
     if (!fs.existsSync(file)) return null;
     const info = fs.lstatSync(file);
     if (!info.isFile() || info.size > 65536) throw new BrowserCleanupError('unsafe browser state record');
     return JSON.parse(fs.readFileSync(file, 'utf8'));
-  };
+  } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; } };
   const nativeStart = async (capture: Capture, identity: Identity): Promise<string> => {
     check(capture);
     const key = `${identity.pid}:${identity.start}`;
@@ -1693,7 +1693,7 @@ function trackShardBrowser(stateDir: string, env: NodeJS.ProcessEnv) {
   };
   const enqueue = () => {
     if (closed || pending || process.platform === 'win32') return;
-    const operation: Capture = { abort: new AbortController(), deadline: Math.min(performance.now() + 10000, deadline, forced ? Infinity : forceAt), probes: new Set() };
+    const operation: Capture = { abort: new AbortController(), deadline: Math.min(performance.now() + 10000, deadline), probes: new Set() };
     active = operation;
     pending = (async () => {
       try {

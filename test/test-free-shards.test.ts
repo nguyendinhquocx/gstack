@@ -87,6 +87,7 @@ if (role === 'leaf') {
     const current = JSON.parse(fs.readFileSync(path.join(path.dirname(process.env.BROWSE_STATE_FILE), 'terminal-agent-pid'), 'utf8'));
     try { process.kill(current.pid, 'SIGTERM'); } catch {}
     for (const child of children) try { child.kill('SIGTERM'); } catch {}
+    if (mode === 'settle-slow-exit') return;
     const finish = () => {
       fs.rmSync(process.env.BROWSE_STATE_FILE, {force:true});
       fs.rmSync(path.join(path.dirname(process.env.BROWSE_STATE_FILE), 'terminal-agent-pid'), {force:true});
@@ -126,10 +127,11 @@ if (role === 'leaf') {
 } else if (role === 'harness') {
   if (mode === 'settle-cold-probes') Object.defineProperty(process, 'platform', {value:'darwin'});
   let spy;
-  if (['replaced-start', 'exit-environment-race', 'unavailable-environment'].includes(mode)) {
+  if (['replaced-start', 'exit-environment-race', 'unavailable-environment', 'settle-slow-exit'].includes(mode)) {
     const original = fs.readFileSync;
     spy = spyOn(fs, 'readFileSync').mockImplementation((filename, ...args) => {
       const value = original(filename, ...args);
+      if (mode === 'settle-slow-exit' && String(filename).endsWith('/environ') && fs.existsSync(file('.interrupted'))) Bun.sleepSync(300);
       if (String(filename).endsWith('/environ') && fs.existsSync(file('.ready'))
         && (mode === 'unavailable-environment' || mode === 'exit-environment-race' && fs.existsSync(file('.interrupted')))) {
         const own = JSON.parse(original(file('.ready'), 'utf8'));
@@ -147,6 +149,19 @@ if (role === 'leaf') {
         }
       }
       return value;
+    });
+  } else if (mode === 'cancel-vanishing-record') {
+    // The daemon removes its state file on SIGINT: one existence check sees it,
+    // and it is gone before the record is read.
+    const original = fs.existsSync;
+    spy = spyOn(fs, 'existsSync').mockImplementation((filename) => {
+      if (original(file('.interrupted')) && original(file('.ready')) && !original(file('.vanished'))
+        && String(filename) === JSON.parse(fs.readFileSync(file('.ready'), 'utf8')).stateFile) {
+        fs.rmSync(String(filename), {force:true});
+        fs.writeFileSync(file('.vanished'), 'true');
+        return true;
+      }
+      return original(filename);
     });
   } else if (mode === 'directory-remove-failure') {
     const original = fs.rmSync;
@@ -186,8 +201,8 @@ function ownershipProcessAlive(identity: { pid: number; start: string; ticks: st
 describe('test-free-shards: owned detached browser settlement', () => {
   for (const mode of ['success', 'failure', 'timeout', 'cancel', 'cancel-force', 'endpoint-mix', 'full-state-mix',
     'terminal-mix', 'chromium-mix', 'replaced-pid', 'stale-child-start', 'replaced-start', 'exit-environment-race',
-    'unavailable-environment', 'directory-remove-failure', 'cancel-cold-probes', 'settle-cold-probes']) {
-    test.skipIf(process.platform === 'win32' || ((['replaced-start', 'exit-environment-race', 'unavailable-environment'].includes(mode) || mode.endsWith('cold-probes')) && process.platform !== 'linux'))(mode, async () => {
+    'unavailable-environment', 'directory-remove-failure', 'cancel-cold-probes', 'settle-cold-probes', 'settle-slow-exit', 'cancel-vanishing-record']) {
+    test.skipIf(process.platform === 'win32' || ((['replaced-start', 'exit-environment-race', 'unavailable-environment', 'settle-slow-exit', 'cancel-vanishing-record'].includes(mode) || mode.endsWith('cold-probes')) && process.platform !== 'linux'))(mode, async () => {
       const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'free-owned-browser-'));
       const actor = path.join(directory, 'actor.ts');
       fs.writeFileSync(actor, OWNERSHIP_ACTOR);
@@ -251,6 +266,9 @@ process.exit(code);
           'unavailable-environment', 'directory-remove-failure', 'settle-cold-probes'].includes(mode);
         expect(result.status).toBe(mode === 'timeout' ? 'timed-out' : invalid || mode === 'failure' || mode.startsWith('cancel') ? 'failed' : 'passed');
         expect(result.unattributedFailures).toBe(invalid || mode === 'timeout' || mode.startsWith('cancel') ? 1 : 0);
+        // Run 13 (feaa28d) and a 16-vCPU stress run: the cancelled daemon's state file
+        // vanished between the existence check and the read ('browser ownership unavailable').
+        if (mode === 'cancel-vanishing-record') expect(fs.existsSync(path.join(directory, 'owned.vanished'))).toBe(true);
         if (invalid) {
           expect(fs.existsSync(path.dirname(own.stateFile))).toBe(true);
           expect(fs.existsSync(path.join(directory, 'owned.interrupted'))).toBe(mode === 'directory-remove-failure');

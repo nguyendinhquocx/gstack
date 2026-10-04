@@ -410,7 +410,7 @@ operator `~/.claude` config, MCP servers (gbrain, Conductor), skills, `~/.gstack
 decision logs, and `CONDUCTOR_*` env never leak into the child. The `GITHUB_`
 and `EVALS_` prefix rules preserve CI metadata but reject credential-shaped
 names such as `GITHUB_TOKEN`, `GITHUB_PERSONAL_ACCESS_TOKEN`, and
-`GITHUB_APP_PRIVATE_KEY`. Named provider auth, runner `extraAllow` entries, and
+`GITHUB_APP_PRIVATE_KEY`. The screen reads every underscore-separated segment, so a trailing qualifier does not carry a name past it (`GITHUB_APP_PRIVATE_KEY_BASE64`, `GITHUB_TOKEN_1`), while a segment that merely contains a credential word stays metadata (`GITHUB_PATH`, `GITHUB_TOKENIZER`). Named provider auth, runner `extraAllow` entries, and
 per-test overrides are deliberate exceptions; a name-based rule cannot identify
 a secret assigned to an arbitrary metadata name. This keeps local eval signal
 aligned with CI instead of disagreeing for reasons unrelated to the code under
@@ -602,6 +602,31 @@ is a CLI flag) so every caller gets it on both paths. Exported test seams:
 `pickEngine(fresh, deps)` (inject the probe and the binary resolver),
 `serveDir(root, nonce)`, `SAFE_TMP_DIR`, and `PAGE_NUMBER_FOOTER` (the one
 page-number footer make-pdf, `gstack-render`, and the browse `pdf` command share).
+
+## Prompt audit at each frontier-model release
+
+When a new frontier Claude model ships, audit the text models read for
+instructions the new model over-applies or no longer needs. The audit is
+Anthropic's `/claude-api prompt-audit`, a Claude Code skill you run in your own
+Claude Code session; gstack only prints what to feed it.
+
+```bash
+bun run audit:manifest   # slices of templates, resolvers, overlays, CLAUDE.md and wording-pinning tests (--json for a machine-readable list)
+```
+
+1. In Claude Code, run `/claude-api prompt-audit` with the new model as the
+   target, one slice at a time, giving it that slice's file list. `s01` is the
+   shared text every skill reads (CLAUDE.md, model overlays, preamble
+   resolvers); a skill's template and its sections share one slice.
+2. Fix findings in templates and resolvers, never in generated SKILL.md files,
+   then run `bun run gen:skill-docs --host all`.
+3. Treat safety rules as held: reword one only where an eval shows the model
+   obeys it both before and after the change.
+4. Work through the "tests that pin skill wording" slices last. Where prose
+   changed, replace exact-sentence pins with structural or meaning checks
+   (the prompt-bytes rule in CLAUDE.md's testing section).
+5. `test/archaeology-lint.test.ts` keeps issue numbers and incident stories out
+   of the generated text; its failure names the source file to fix.
 
 ## Jargon list (V1 writing style)
 

@@ -23,7 +23,7 @@ test('adversarial outside failures retain the required native pass without dupli
       expect(preflight).not.toMatch(/fall(?:ing)? back to (?:a|the) .*subagent/i);
       const output = generateAdversarialStep(ctx);
       expect(output).toContain('adversarial subagent (always runs)');
-      expect(output).toContain('For non-ready modes, retain the native pass above; do not dispatch it again.');
+      expect(output).toContain('For other modes, retain the native pass above; do not dispatch it again.');
       expect(output.match(/Retain the required native pass without duplicating it; it cannot complete outside coverage\./g)).toHaveLength(2);
       expect(output).not.toContain("Use the caller's fallback");
       expect(output).toContain('Only this optional outside adversarial pass is non-blocking');
@@ -64,7 +64,10 @@ test('CEO and Eng describe the actual disabled route and completion validator', 
         expect(output.replace(/\s+/g, ' ')).toContain('If preflight selected `disabled`, use the guarded record below');
         expect(output).toContain('"outside_status":"disabled"');
       } else expect(output).toContain('persist `outside_status: disabled` with the guarded');
-      const prompt = output.slice(output.indexOf('"IMPORTANT:'), output.indexOf('\n<plan content>"'));
+      const promptEnd = output.indexOf('\n<plan content>"');
+      const prompt = output.slice(output.lastIndexOf('\n"', promptEnd) + 1, promptEnd);
+      expect(prompt.startsWith('"')).toBe(true);
+      expect(prompt.split('\n')[0]).toContain('.claude/skills/');
       expect(prompt).toContain('End with Recommendation: <action> because <specific reason>');
       expect(prompt).toContain('If there are no findings, say so and explain why');
       const invocation = outsideVoiceInvocation(ctx);
@@ -195,7 +198,8 @@ describe('outside reviewer runtime discovery in fresh shells', () => {
     f.install(f.local);
     const explicit = f.install(path.join(f.home, 'explicit runtime'));
     expect(f.preflight({ GSTACK_ROOT: explicit }).stdout).toContain(`RESOLVED_ROOT: ${explicit}`);
-    expect(f.preflight({ GSTACK_BIN: path.join(explicit, 'bin') }).stdout).toContain(`RESOLVED_ROOT: ${explicit}`);
+    // C1: only an exported GSTACK_ROOT (with bin/ and lib/) is honored; a lone GSTACK_BIN falls back to the repo-local install.
+    expect(f.preflight({ GSTACK_BIN: path.join(explicit, 'bin') }).stdout).toContain(`RESOLVED_ROOT: ${f.local}`);
     const result = f.preflight({ GSTACK_ROOT: '/missing/gstack', GSTACK_BIN: '/missing/gstack/bin' });
     expect(result.stdout).toContain('CODEX_MODE: ready');
     expect(result.stdout).toContain(`RESOLVED_ROOT: ${f.local}`);

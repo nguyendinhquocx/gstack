@@ -20,6 +20,7 @@ With focus (e.g., "security"):
 Review the changes on this branch against the base branch. Run `git diff origin/<base>` to see the diff. Focus specifically on SECURITY. Your job is to find every way an attacker could exploit this code. Think about injection vectors, auth bypasses, privilege escalation, data exposure, and timing attacks. Be adversarial."
 
 2. Run codex exec with **JSONL output** to capture reasoning traces and tool calls.
+Replace `<prompt>` with the full prompt from step 1, verbatim and unescaped; Codex reads it on stdin.
 Use `timeout: 600000` on the Bash call (the tool's maximum) — the gate sits ABOVE the
 540s wrapper so the wrapper fires first, ends Codex, and prints its explicit stall message:
 
@@ -35,9 +36,15 @@ fi
 # Fix 1+2: wrap with timeout (gtimeout/timeout fallback chain via probe helper),
 # capture stderr to $TMPERR for auth error detection (was: 2>/dev/null).
 [ -n "${TMPERR:-}" ] || TMPERR=$(mktemp "$TMP_ROOT/codex-err-XXXXXX") || { echo "ERROR: mktemp failed in TMP_ROOT=$TMP_ROOT; not running codex without its temp file" >&2; exit 1; }
+TMPRESP=$(mktemp "$TMP_ROOT/codex-resp-XXXXXX") || { echo "ERROR: mktemp failed in TMP_ROOT=$TMP_ROOT; not running codex without its temp file" >&2; exit 1; }
 source ~/.claude/skills/gstack/bin/gstack-codex-probe || exit 1
 _gstack_codex_select_model exec || exit 1
-_gstack_codex_timeout_wrapper 540 codex exec "<prompt>" -C "$_REPO_ROOT" -s read-only -c "model=\"${_GSTACK_CODEX_SEL:?}\"" -c skills.include_instructions=false -c 'model_reasoning_effort="high"' -c 'web_search="cached"' --json < /dev/null 2>"$TMPERR" | PYTHONUNBUFFERED=1 "$PYTHON_CMD" -u -c "
+_PROMPT_FILE=$(mktemp "$TMP_ROOT/codex-prompt-XXXXXX") || { echo "ERROR: mktemp failed in TMP_ROOT=$TMP_ROOT; not running codex without its temp file" >&2; exit 1; }
+# The prompt goes to Codex on stdin (codex exec -), verbatim: no shell quoting, no argv size limit.
+cat > "$_PROMPT_FILE" <<'CODEX_PROMPT_END'
+<prompt>
+CODEX_PROMPT_END
+_gstack_codex_timeout_wrapper 540 codex exec - -C "$_REPO_ROOT" -s "${_GSTACK_CODEX_SANDBOX:?}" -c "model=\"${_GSTACK_CODEX_SEL:?}\"" -c skills.include_instructions=false -c 'model_reasoning_effort="high"' -c 'web_search="cached"' --json -o "$TMPRESP" < "$_PROMPT_FILE" 2>"$TMPERR" | tee "$TMPRESP.events" | PYTHONUNBUFFERED=1 "$PYTHON_CMD" -u -c "
 import sys, json
 turn_completed_count = 0
 turn_failed = False
@@ -69,14 +76,14 @@ for line in sys.stdin:
             err = obj.get('error',{}).get('message','') or 'no error message in event'
             print(f'[codex turn FAILED] {err}', flush=True, file=sys.stderr)
     except: pass
-# Fix 2: three-way completeness check (#2671) — a STATED failure is a failure,
+# Fix 2: three-way completeness check — a STATED failure is a failure,
 # not a network problem; only silence with no terminal event is a disconnect.
 if turn_failed:
     print('[codex] turn.failed received — the turn errored (reason above), not a disconnect.', flush=True, file=sys.stderr)
 elif turn_completed_count == 0:
     print('[codex warning] No turn.completed event received — possible mid-stream disconnect.', flush=True, file=sys.stderr)
 "
-_CODEX_EXIT=${PIPESTATUS[0]:-${pipestatus[1]}}  # bash sets PIPESTATUS; zsh (lowercase, 1-indexed) falls through (#2669)
+_CODEX_EXIT=${PIPESTATUS[0]:-${pipestatus[1]}}  # bash sets PIPESTATUS; zsh (lowercase, 1-indexed) falls through
 # Fix 1: hang detection — log + surface actionable message
 if [ "$_CODEX_EXIT" = "124" ]; then
   _gstack_codex_log_event "codex_timeout" "540"
@@ -84,7 +91,7 @@ if [ "$_CODEX_EXIT" = "124" ]; then
   echo "Codex stalled past 9 minutes. Common causes: model API stall, long prompt, network issue. Try re-running. If persistent, split the prompt or check ~/.codex/logs/."
 elif [ "$_CODEX_EXIT" != "0" ]; then
   # Surface non-zero exits so the calling agent doesn't read "no output" as
-  # a silent model/API stall. See #1327.
+  # a silent model/API stall.
   echo "[codex exit $_CODEX_EXIT] $(head -1 "$TMPERR" 2>/dev/null || echo "no stderr captured")"
   head -20 "$TMPERR" 2>/dev/null | sed 's/^/  /' || true
   _gstack_codex_log_event "codex_nonzero_exit" "challenge:$_CODEX_EXIT"
@@ -94,7 +101,13 @@ if grep -qiE "auth|login|unauthorized" "$TMPERR" 2>/dev/null; then
   echo "[codex auth error] $(head -1 "$TMPERR")"
   _gstack_codex_log_event "codex_auth_failed"
 fi
+bun ~/.claude/skills/gstack/lib/outside-review-result.ts --label 'Codex challenge' --exit "$_CODEX_EXIT" --stderr "$TMPERR" --events "$TMPRESP.events" execution "$TMPRESP"
+rm -f "$TMPRESP" "$TMPRESP.events" "$_PROMPT_FILE"
 ```
+
+`VERDICT: unavailable` means the challenge did not run (its line names why, such as a
+sandbox that could not start): say so and present no findings from it. Otherwise
+present the output below.
 
 This parses codex's JSONL events to extract reasoning traces, tool calls, and the final
 response. The `[codex thinking]` lines show what codex reasoned through before its answer.

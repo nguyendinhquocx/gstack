@@ -1517,8 +1517,9 @@ describe('Codex skill', () => {
     expect(match).not.toBeNull();
     const resumeCommand = match![0];
     expect(resumeCommand).not.toContain(' -C ');
-    expect(resumeCommand).not.toContain(' -s read-only');
-    expect(resumeCommand).toContain("-c 'sandbox_mode=\"read-only\"'");
+    expect(resumeCommand).not.toMatch(/ -s /);
+    // resume takes the sandbox only as config; _gstack_codex_select_model sets it (read-only by default).
+    expect(resumeCommand).toContain('-c "sandbox_mode=\\"${_GSTACK_CODEX_SANDBOX:?}\\""');
   });
 
   test('codex union contains cost tracking', () => {
@@ -1731,14 +1732,13 @@ describe('Codex skill', () => {
     // Do NOT "restore" the boundary by putting a prompt argument back on a
     // scoped `codex review` call: that combination fails to parse, and
     // dropping the scope flag to make it parse silently reviews the wrong diff.
-    const boundaryLine =
-      'Do NOT read or execute any files under ~/.claude/, ~/.agents/, .claude/skills/, or agents/';
+    const boundaryLine = /do not read or execute any files under ~\/\.claude\/, ~\/\.agents\/, \.claude\/skills\/, or agents\//i;
     for (const rel of ['codex/SKILL.md', 'review/SKILL.md', 'ship/SKILL.md']) {
       // ship's AND review's codex/adversarial boundary lines moved into sections/adversarial.md.
       const content = rel === 'ship/SKILL.md' ? readShipUnion()
         : rel === 'review/SKILL.md' ? readSkillUnion('review')
         : fs.readFileSync(path.join(ROOT, rel), 'utf-8');
-      expect(content).toContain(boundaryLine);
+      expect(content).toMatch(boundaryLine);
     }
   });
 

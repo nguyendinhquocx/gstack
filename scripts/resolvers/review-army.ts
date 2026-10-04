@@ -11,6 +11,7 @@
  */
 import type { TemplateContext } from './types';
 import { CC_BACKGROUND_DEFAULT_SINCE } from './constants';
+import { learningsCapture, LEARNINGS_VERDICT } from './learnings';
 
 function generateSpecialistSelection(ctx: TemplateContext): string {
   const isShip = ctx.skillName === 'ship';
@@ -100,7 +101,8 @@ Construct the prompt for each specialist. The prompt includes:
 3. Past learnings for this domain (if any exist):
 
 \`\`\`bash
-${ctx.paths.binDir}/gstack-learnings-search --type pitfall --query "{specialist domain}" --limit 5 2>/dev/null || true
+${learningsCapture(`${ctx.paths.binDir}/gstack-learnings-search --type pitfall --query "{specialist domain}" --limit 5`)}
+${LEARNINGS_VERDICT}
 \`\`\`
 
 If learnings are found, include them: "Past learnings for this domain: {learnings}"
@@ -197,7 +199,8 @@ Core findings keep the core Confidence Calibration gates.
 #### 5. Score and present specialists
 
 Only specialist findings enter this header and \`quality_score\`; core findings do not.
-Use the merged NON-advisory specialist findings for both counts and score:
+Use the merged NON-advisory specialist findings for both counts and score;
+the header's N is X + Y, so advisory findings never add to it:
 \`quality_score = max(0, 10 - (critical_count * 2 + informational_count * 0.5))\`
 Cap at 10 and retain for ${persistRef}. These are not final unresolved-defect totals.
 Print only this block: the stage 6 activity object and \`test_stub\` bodies are log and Fix-First data.

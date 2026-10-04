@@ -2,12 +2,127 @@
 
 ## NEXT PRIORITY
 
+### P2/P3: severe fix wave follow-ups (filed 2026-10-03, v1.91.19.0)
+
+Deferred from the approved severe fix wave (docs/designs/SEVERE_FIX_WAVE_2026_10.md), each with its reason.
+
+- **Enforce the Bun floor at setup (#2815)** — `engines.bun` is now `>=1.4.0`
+  (the CI pin), but Bun does not enforce `engines` and setup never checks the
+  version. Bun older than 1.3.3 silently ignores `--no-compile-autoload-dotenv`
+  and `--no-env-file` (verified with 1.3.2), so D0's protection against a
+  project's `.env`/`bunfig.toml` is silently off there. Setup should refuse or
+  warn below the floor. **Effort:** S. **Priority:** P2.
+- **Windows Node CLI lane for Smart App Control (E3; #2596, #2595, #2124)** —
+  a `dist/browse` wrapper would shadow `browse.exe` for every Windows user;
+  launcher precedence (browse vs browse.exe vs browse.cmd under Git Bash and
+  cmd) and the node-missing message need a Windows SAC machine to verify.
+  **Effort:** M. **Priority:** P2.
+- **C8 router wording behind a routing panel** — disabled skills now leave the
+  router, but the "When in doubt, invoke the skill" wording change (Tier 3) was
+  not run through a routing eval panel. **Effort:** S. **Priority:** P3.
+- **Cross-block variables on fresh-shell hosts: make-pdf `$P`** — make-pdf
+  "exports" `$P` for later blocks, which Codex and the other env-var hosts lose
+  between blocks (same class as `$B`/`$D`, which the shared prelude now
+  re-derives). Add `P` to the runtime prelude or resolve it per block.
+  **Effort:** S. **Priority:** P2.
+- **#2709's recorded-Chromium reap never runs on Playwright 1.62** — Playwright
+  1.62's `Browser` has no `process()`, so `chromiumProcInfo` is always null and
+  the cleanup is a no-op (verified by probe). Record the PID another way (CDP
+  `SystemInfo.getProcessInfo` or the launch server). **Effort:** S. **Priority:** P2.
+- **#2670's bash half in `bin/gstack-brain-sync`** — the TypeScript stage
+  verdict now reports a 0-page artifacts source; the bash brain-sync still has
+  no `index_failed` status file or page-count probe. **Effort:** S. **Priority:** P3.
+- **Navigation guard acts after the request is sent** — Playwright routing
+  cannot see redirect hops, so a blocked hop resets the tab and fails the
+  command after the request left. Pre-send blocking needs CDP Fetch
+  interception, including out-of-process iframes. **Effort:** M. **Priority:** P3.
+- **Redaction repo allowlist (#2598)** — a per-repo `+++ b/<path>` skip list
+  (generated `*.svg`/`*.excalidraw`, #2827) for noise context rules cannot
+  cover. New config surface, so out of the wave. **Effort:** M. **Priority:** P2.
+- **Global-discover Codex session schema (#2750)**, **ios-qa boot-token fixes
+  (#1837, #1975; need a device)**, **absolute bun path for compiled browse
+  spawns (#931; macOS repro unclear)** and **GitLab CI `curl | bash` (#1713)** —
+  out of the wave's scope. **Priority:** P3 each.
+- **Upstream gbrain batch lookup** — a per-slug existence lookup and a separate
+  `pending` list in `gbrain import --json`, so the landing check need not list a
+  whole source and spawn `get` per page. **Effort:** M (upstream). **Priority:** P2.
+- **Memory follow-ups** — record repo identity for gbrain sources at
+  registration (prune can prove ownership of a pre-wave source only from the
+  same repository's main checkout); a deliberate migration of pre-wave
+  transcripts out of `default` into per-repo sources (needs gbrain-side page
+  moves); decide #2778's "nearest existing ancestor" attribution for deleted
+  worktrees (risk: attributing to an unrelated parent repo like a dotfiles
+  repo). **Priority:** P3 each.
+- **G2 on the TS twin** — `lib/bin-context.ts` (the Windows fallback) shares the
+  common-dir slug keying but does not record former worktree buckets.
+  **Effort:** S. **Priority:** P3.
+- **Codex follow-ups** — post-run `codex_sandbox_unavailable` telemetry (only
+  the preflight logs it today); the Q2 first-use notice covers Codex only, not
+  the Codex host's Claude Code outside voice; the bash-native timeout watchdog
+  cannot reap grandchildren when `pkill` is missing; document enabling
+  unprivileged user namespaces in common containers. **Priority:** P3 each.
+- **Live Codex multi-block check as a periodic paid case** — the wave ran it
+  once by hand (fresh `CODEX_HOME`, fresh clone, `./setup --host codex`, one
+  multi-block skill). Make it a periodic case so a regression shows up weekly.
+  **Effort:** M. **Priority:** P2.
+- **/review's working-tree fingerprint under Codex's default sandbox** — the
+  live Codex check (v1.91.19.0) showed `bin/gstack-wtree` exits 1 inside
+  `codex exec -s workspace-write`, because Codex mounts `.git` read-only and the
+  fingerprint writes untracked content into `.git/objects`. `gstack-review-log
+  --start review` then fails with `cannot capture a diff review without a
+  working-tree fingerprint` (loud, not a false pass), and `git fetch` cannot
+  write `FETCH_HEAD`. Use a private object directory
+  (`GIT_OBJECT_DIRECTORY` + `GIT_ALTERNATE_OBJECT_DIRECTORIES` under
+  `$TMPDIR`) for the fingerprint, and report the fetch as stale-base coverage.
+  **Effort:** S. **Priority:** P2.
+- **Closed by the wave's evals2 lane (run 37162480720):** Codex paid evals now
+  run commands in CI (host-run job; all 8 Codex cases executed real commands),
+  ship-exploratory-late-input no longer ends `inconclusive` (capture names the
+  probes to rerun after an input change), plan-eng-multi-finding-batching's
+  checker and office-hours-brain-writeback's prompt are fixed (3/3).
+  plan-eng-review-artifact (0/4 since #3017) measured a shortcut prompt that
+  skipped the workflow; it now drives the real interactive /plan-eng-review in
+  a PTY. A fresh run needs more than its 600 s budget (498 s pass; 595 s
+  timeouts in census 37174266054 and a local run), so the periodic case
+  resumes at Test review from that census run's real Scope Challenge ledger
+  (pass, 364 s) and the fresh run is the marathon case
+  plan-eng-review-artifact-full.
+- **Gate-outcome telemetry** — count `not_run`/`unavailable` outcomes per
+  reason code from `lib/gate-outcomes.ts` so the most common gaps get fixed
+  first. **Effort:** S. **Priority:** P3.
+- **/gstack-upgrade redesign around the install registry**, a **marketplace
+  distribution channel**, and a **placeholder convention for generated bash**
+  (`<placeholder>` vs real syntax in fences). **Priority:** P3 each.
+- **Design CLI health subcommand** — the DESIGN SETUP probe uses `--version`; a
+  richer `design health` could check the API key and model access too.
+  **Effort:** S. **Priority:** P3.
+- **Autoplan publication hook under cmd.exe** — `scripts/resolvers/composition.ts`
+  still registers `bash -c '<script>'`; the multi-line script with JSON printf
+  needs its own cmd.exe argv verification. **Effort:** S. **Priority:** P3.
+- **#2971 pieces outside the approved salvage** — ship/land validation-command
+  tuples and the requested-review/waiver gate in /land-and-deploy, the click
+  `<option>` 500 ms probe, 0600 modes on ingest state and staging files,
+  gbrain-sync's held-checkpoint refusal, and the question-preference hook's
+  fail-closed allowlist. **Priority:** P3 each.
+
 ### P1: paid-eval follow-ups from the v1.91.12.0 proof censuses (filed 2026-09-29)
 
 - **Thin budgets on slow API days** — on Claude Code 2.1.284, review-army-perf
   (274 of 300 s) and the ship-docsync fault cases (250-263 of 285 s) sit at
   88-93% of their budgets; a slow-API census can time them out on either CLI
   version. Make those skills faster rather than raising budgets. Effort M.
+  **Progress (v1.91.19.0, 2026-10-04):** /ship's documentation gate now
+  saves and checks its candidate with `bin/gstack-docs-candidate`
+  (`snapshot`/`compare`) instead of ~20 separate Git/hash calls and a
+  hand-written candidate JSON. Wall time (CI b24b6d8 before → two local trials
+  after, same budgets): store 476 → 346/386 s, current 354 → 339/326 s,
+  completion 412 → 372/371 s, failure 197 → 215/201 s; the eight other fault
+  cases moved within ±20 s (one trial each, all 12 PASS). Parent pre-dispatch
+  time fell from 140-186 s to 118-159 s. Parent tool calls did not fall
+  (store 55 → 51/62): the parent still reads release files the child re-reads,
+  and model thinking gaps (up to 77 s) dominate. Before/after machines differ
+  (CI vs local), so treat these as indicative. Next: stop the parent reading
+  release-file contents at all and let the child return hashes it read.
 - **Recurring reds to repair, not rerun** — `plan-design-review-plan-mode`
   (one ~250 s thinking block before its single write; times out at 300 s on
   2.1.251 in every recent run) and the HOLD SCOPE
@@ -19,7 +134,91 @@
   the handoff in its reasoning and later says it was "sent above". A prose fix
   won't reach it; this needs a mechanism outside the prompt (a hook or a
   tool-result gate). The HOLD SCOPE routing case fails whenever the handoff is
-  skipped and nothing else names the posture in time. Effort M.
+  skipped and nothing else names the posture in time. auto-decide-preserved
+  fails the same way: in periodic census 37176837432 (7249f01) the model
+  checked the preference, auto-selected HOLD SCOPE and logged it, but never
+  printed the `Auto-decided review mode → …` line, so the observer timed out.
+  Census history (last 15 periodic runs, 2026-09-29 to 10-04): mode-routing red
+  in 4 (36633323521, 36641820398, 36903600510 before this wave; 37176837432),
+  auto-decide-preserved red in 5 (36633323521, 36776104571, 36787269090,
+  36920606897 before this wave; 37176837432). Effort M.
+  **Completed:** v1.91.19.0 (2026-10-04). Step 0E now runs
+  `gstack-ceo-mode-handoff`, which prints the handoff line as a tool result,
+  and the auto-decide detector accepts the documented line with its
+  `Approved decisions:` suffix (trial 1 printed it and was rejected; the replay
+  is `test/fixtures/auto-decide-handoff-line-e354.json`). Local paid trials after
+  the repair: auto-decide-preserved 1/1, plan-ceo-mode-routing 1/1 (both modes);
+  every session ran the helper.
+- **plan-ceo-section-loading misses correctly worded stale-fill findings** —
+  censuses 37178734784 (65d94f2) and 37182865432 (44ef18c) failed
+  `hasStaleFillRaceFinding` although the review found the race. In 44ef18c it
+  named schedule S2 ("a read can fetch an old copy, pause, and only then put
+  it in the cache… every later reader gets stale data") and approved a
+  fill-admission guard. The detector is a regex family over phrasings; adding a
+  spelling per failure is the wrong fix. Bind the case to a structured finding
+  record (or an LLM judge with a fixed rubric) instead. 2 of the last 3
+  censuses, 0 of the 16 before. Effort M. **Priority:** P2.
+  **Completed:** v1.91.19.0 (2026-10-04). The case now reads the skill's own
+  decision-ledger row and `currentDecision` question
+  (`test/helpers/ceo-stale-fill-decision.ts`), with the phrase detector kept as
+  the alternate witness. Across eight census captures the structured check
+  finds 7 (it misses 37174266054, whose ledger row was left `unresolved`) and
+  the phrase detector finds 6; together they find all 8. The two missed reports
+  and one passing report are replayed from `test/fixtures/ceo-stale-fill-decision/`.
+- **auq-matrix recommendation-substance judge rotates red** — census
+  37182865432 scored plan-design-review's "A because the plan is thin
+  everywhere, so skipping dimensions mostly skips gaps" 3 < 4. The same case
+  was red in 5 of the 16 earlier censuses (37151477069 on main,
+  36898545245, 36787269090, 36641820398, 36633323521) across skills and checks
+  (a two-`(recommended)` option count; office-hours substance). It is kind
+  `rule` but gates on one judge sample. Decide under EVAL_POLICY whether it is
+  a `judge` case (3 samples, mean) and supply pass-rate evidence before
+  changing the kind. Effort S. **Priority:** P2.
+- **qa/SKILL.md workflow judge dips below its actionability floor** — census
+  37186854666 (b24b6d8) scored actionability 3.67 < 4 (clarity 3, completeness
+  4) on the same qa bundle bytes that passed in census 37182865432 (44ef18c);
+  nothing under qa/, qa-only/ or scripts/resolvers changed between them. Red in
+  2 of the 17 earlier censuses (36920606897, 36776104571). Judge kind, 3
+  samples, unchanged threshold. The qa-only workflow judge did the same in
+  census 37198445662 (fd6854b): 3.67/4.33/3.67, one 3/4/3 sample citing density,
+  on qa-only bytes unchanged since 44ef18c, where it passed in four censuses.
+  Find which bundle step the low samples call unactionable before rewording.
+  Effort S. **Priority:** P3.
+- **shared-libs-review-revalidation stalls mid-stream** — gate census 4 of
+  37186854666: the `filtered` scenario's stream stopped after a thinking block
+  at 07:51:21 and emitted nothing until the 657 s abort; the other three
+  scenarios passed. First red in 18 censuses. Classify a silent provider stream
+  as INFRA (no events for N minutes) rather than a test timeout. Effort S.
+  **Priority:** P3.
+- **overlay-harness sonnet fails on a baseline-arm model error** — census
+  37198445662 (fd6854b,
+  https://github.com/garrytan/gstack/actions/runs/37198445662): the
+  overlay-OFF arm's trial 0 grepped exports without `async` and reported
+  `src/api.ts: []` (missing `export async function fetchFoo`); 19 of 20
+  trials were correct and every overlay-ON trial passed. The correctness gate
+  requires all 20, so one control-arm slip reds a research comparison. First
+  red in the last five censuses. Decide whether a control-arm error should
+  invalidate the comparison (rerun policy) rather than fail the overlay.
+  Effort S. **Priority:** P3.
+- **plan-ceo-review-format-approach hit provider refusals** — census
+  37195203538 (4128700,
+  https://github.com/garrytan/gstack/actions/runs/37195203538): t1 and t2
+  ended in `model_refusal_no_fallback` (`reasoning_extraction`) on inputs
+  byte-identical to its 9/9 passes in 37182865432, 37186854666 and
+  37193478719; it passed 3/3 again in 37198445662. Classify a provider refusal
+  as INFRA rather than an assertion, and check whether the capture prompt's
+  "verbatim … exact prose you would have shown" wording trips the classifier.
+  Effort S. **Priority:** P3.
+- **Floor runner cannot grant an owned Edit when the TTY collapses spaces** —
+  PR run 37176835584 (7249f01): plan-ceo-finding-floor timed out at 600 s with
+  the native "Do you want to make this edit to gstack-test-plan-ceo-floor.md?"
+  menu on screen for its last ~5 minutes. The diff preview rendered context
+  rows with collapsed spaces (`210 C)Smoke-test…`, wrapped rows without their
+  gutter), so `currentEditPreview` could not parse the rows, the guard never
+  verified the owned edit, and nothing answered it. 1 of the last 12 PR-lane
+  runs; 0 of 15 censuses. Fix: accept collapsed context rows and gutterless
+  wraps in the preview parser (still compared against the exact source lines),
+  with the captured screen as a free regression. Effort S-M. **Priority:** P2.
 - **Pre-push hook tests hang behind some shard neighbors** — on the free-suite
   plan for dfe5e733, `test/redact-prepush-hook.test.ts` timed out 6 of 28 tests
   at 30 s in shard 12 on two attempts (the hook process was still running and
@@ -32,6 +231,31 @@
   a different handful of single-trial reds. Once `eval:pass-rates` has 10 weekly
   trials per case, apply the CASE_QUARANTINE entry rule instead of chasing one
   run at a time. Effort S.
+
+### P2/P3: mvanhorn fix-wave deferrals (filed 2026-10-03, from the autoplan review of the wave)
+
+- **E6 (P2): behavior E2E for design round accounting** — stub `$D` so a
+  generating step reports `saved` shorter than `requested` (and exit 2 for zero
+  saved), run /plan-design-review or /design-shotgun against it, and assert the
+  skill tells the user how many paid images were saved, names the failures and
+  builds no board on zero saved. `test/design-printed-paths.test.ts` only pins
+  the marker order; whether the model reports the count is behavior. Context:
+  #1529. Effort M.
+- **E7 (P3): prune or archive unapproved design rounds** — never-overwrite plus
+  `--retry` attempts and iterate outputs grow
+  `$GSTACK_STATE_ROOT/projects/$SLUG/designs/` without bound. Add a prune or
+  archive command for unapproved rounds and attempts (keep anything an
+  `approved.json` names) and show the design directory size in `$D gallery`.
+  Context: #1529, eng review. Effort S.
+- **E5 (P3): restore verifies assumed items read-only** — `/context-restore`
+  could check `(path assumed)` and `(code read)` items itself with read-only
+  commands (file exists, flag is defined, table has a unique key) and report
+  what it found before offering option A. Context: #3004. Effort M.
+- **E4 (P3): real-desktop Windows console smoke for spawn changes** — #1784 was
+  confirmed fixed on a real Windows 11 desktop by its reporter (v1.91.15.0); CI
+  can only check that spawns pass `windowsHide`. A smoke that starts browse from
+  a console-less parent and watches for new visible windows would catch a
+  regression the static sweep can't. Effort M.
 
 ### P2/P3: parallel fix-wave follow-ups (filed 2026-10-02, from the approved fix-wave plan)
 
@@ -102,79 +326,48 @@
 
 Each item was deferred with a reason during the `/claude-api prompt-audit` cleanup.
 
-- **Safety rules kept at their old volume until an eval covers them.** A rule's
-  wording changes only when an eval shows the model still obeys it before and
-  after. These keep their wording, and each needs the named eval first:
-  - `CODEX_BOUNDARY` (scripts/resolvers/outside-voice-steps.ts): a codex-host
-    /review run asserting Claude Code never reads `.claude/skills/` or `agents/`.
-  - /ship Step 16 "IRON LAW: NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION
-    EVIDENCE": a ship E2E that offers a stale-evidence completion and asserts the
-    step blocks.
-  - design-review stop conditions (risk %): an eval that reaches the stop
-    condition with no cap coaching, runs where `browserAvailable()` resolves, and
-    asserts termination plus a report of remaining findings. `design-review-fix`
-    self-skips without Aside and accepts `error_max_turns`.
-  - pair-agent "output the full instruction block": no eval exercises relaying
-    the block verbatim.
-  - codex consult-mode "embed content, don't reference path": no eval checks that
-    the plan content, not its path, reaches Codex.
-  - ios-qa "DEMO MODE OVERRIDES ALL OTHER RULES": no device-free eval covers demo
-    mode.
-  Priority P2. Effort M per eval.
-- **Judge prompts still say "Respond with ONLY valid JSON"** —
-  `test/helpers/llm-judge.ts` (prompt-audit s11 M1-M7) and the five inline judges
-  in `test/skill-llm-eval.test.ts` (:223, :266, :315, :384, :823) already pass a
-  JSON schema or should. The change lands only with a calibration corpus: stored
-  judged outputs per changed judge (passing, failing, threshold-adjacent), an
-  old-vs-old flip rate, then new-vs-old not above it. Also move the qa
-  anti-refusal judge rubric (`skill-llm-eval.test.ts:291-343`) off "always …
-  regardless" wording in the same commit. Priority P2. Effort M.
-- **Fast PR profile has no CEO E2E probe** — retiring `plan-ceo-review-benefits`
-  removed the only fast PR probe for /plan-ceo-review; CEO template changes now
-  run the CEO judge and `auq-format-gate`. Adding `plan-ceo-review-plan-mode` to
-  `PR_PROFILE_CASE_IDS` fails the "exactly one planned owning file" rule in
-  scripts/lib/paid-plan.ts because the file is planned as more than one shard.
-  Priority P3. Effort S.
-- **Register an Opus 5.5 dedicated-tools overlay case** — the Opus 5.5 run was
-  measured as a one-off. Registering it as a periodic case moves the periodic
-  census walls, release floors and file counts pinned by
-  `test/paid-overlay-scheduling.test.ts`, `test/overlay-lifecycle.test.ts`,
-  `test/paid-retry-supervision.test.ts` and `test/eng-finding-retry-budget.test.ts`;
-  update those budgets in the same commit. Priority P3. Effort S.
-- **Ratchet parity caps back down** — `test/helpers/carve-guards.ts` caps were
-  raised during the cleanup (qa 1.104, land-and-deploy 1.108,
-  design-consultation 1.092, ship 1.405). Re-measure on the merged tree and lower
-  each to its measured value. Priority P3. Effort S.
-- **design-shotgun executor subagents** (prompt-audit s08 G1) — replace the N
-  subagents that only run a fixed script with one parallel bash batch. This
-  changes how variants are dispatched, not the prompt text. Priority P3. Effort S.
-- **Per-record "new sessions only" transcript consent** — let users consent to
-  ingesting only sessions created after they answer. Needs timestamp filtering
-  inside both transcript parsers (Claude Code and Codex) and a mode-plus-cutoff
-  config write that lands as one transaction. Priority P3. Effort M.
-- **Per-repo transcript scope** — `recent`/`all` cover every project on the
-  machine that repo policy allows. Add a way to restrict transcript ingest to
-  chosen repos. Priority P3. Effort M.
-- **Design-doc discovery still reads `~/.gstack/projects`** — converting
-  `DESIGN_DOC_DISCOVERY` (and autoplan's Step 2 lookup) to `$GSTACK_STATE_ROOT`
-  made /plan-eng-review answer its no-target scope gate in prose instead of
-  AskUserQuestion: the plan-mode no-op eval failed 5 of 5 runs with the converted
-  paths and passed 6 of 6 without them. Custom state roots miss office-hours design docs
-  until this lands. Find why the path change shifts the gate (likely the gate's
-  "do not probe for session state" rule), then convert and keep the eval green.
-  Priority P2. Effort S.
-- **Archaeology lint** — a free check that flags issue/PR numbers, plan IDs and
-  incident stories in runtime skill prose (templates and resolver strings), so
-  they stay in commit messages and CHANGELOG. Priority P3. Effort S.
-- **Claude-side model detection** — Claude Code hosts always render the generic
-  `claude` overlay; `./setup --model` is Codex-only. When the next Claude model
-  needs its own overlay, detect the model on the Claude side first, or the
-  overlay never reaches users. Priority P2. Trigger: the next Claude model that
-  needs a tuned overlay.
-- **Re-run the prompt audit at each frontier-model release** — run
-  `/claude-api prompt-audit` over templates, resolvers, overlays, CLAUDE.md and
-  the tests that pin them, and review the low-confidence flags it reports.
-  Priority P3. Trigger: each new frontier model.
+- **Safety rules held: their evals do not discriminate** — the
+  safety-ship-stale-evidence, safety-pair-agent-block, safety-codex-consult-embed
+  and safety-ios-demo-ui-only evals passed 10/10 with the current wording, but
+  their rule-removed arms showed 0/5 violations (2026-10-03, claude-fable-5-1,
+  Claude Code 2.1.284), so they cannot show a rewording is safe. The wording stays
+  until a fixture makes the rule's absence observable. The rules are listed in
+  `test/helpers/safety-rules.ts`. Priority P3. Effort M per fixture.
+- **design-review risk-stop rewording held (R8)** — safety-design-risk-stop
+  discriminates (current wording 10/10, rule removed 1/5 violated), but R8 needs a
+  clean run of the reworded rule on every render that carries it. The copilot,
+  cursor, factory, gbrain, hermes, kiro, openclaw, opencode and slate renders run
+  other models with no runner, and the `.agents` render has no Codex runner for
+  this eval. Narrow the rewording to the design-review render, or add per-host
+  runners. Priority P2. Effort M.
+- **Judge prose and rubric cleanup (W2 deferral)** — the arm, qa health-rubric,
+  qa anti-refusal, cross-skill and voice judges, and the default workflow judge,
+  now send a JSON schema; their prompt-audit s11 M1-M7 prose cleanup is still
+  open, as is the qa anti-refusal rubric's "always … regardless" wording. Two
+  prose steps were triggered and not run: the qa workflow judge (its schema
+  comparison held: 4/24 new flips vs 2/24 old, one new false pass on a06, zero
+  format errors, so it stays on today's request) and the default workflow judge
+  (landed, but one provider refusal on corpus item f03 under the new prompt,
+  matched by one under the old prompt). Reuse `test/fixtures/judge-calibration`
+  and `scripts/judge-calibration.ts`. Priority P3. Effort M.
+- **Uncalibrated workflow-judge configurations** — build corpora and calibrate
+  schema transport for the frontier configuration (review/SKILL.md workflow) and
+  the cookie configuration (setup-browser-cookies/SKILL.md workflow); both stay on
+  today's request. After any transport change, re-run the review and cookie
+  workflow judges. Priority P3. Effort M.
+- **Claude model auto-detection for the skill overlay** — when no
+  `claude_overlay_model` is set, detect the Claude Code model (`ANTHROPIC_MODEL`,
+  user and managed settings `model`) in `./setup` and render its pinned overlay.
+  `./setup --claude-model` is opt-in, so users who never pass it keep the generic
+  overlay. A `/model` switch would leave a stale render, and the pinned overlays
+  are not yet measured against `claude` on their own models.
+  `bin/gstack-render-claude.sh`, its activation record and the change-only banner
+  are in place; detection would record `source=detected`. Depends on: task-result
+  evidence that a pinned overlay beats `claude` on its model. Priority P3.
+- **Per-session overlay selection (E6)** — a runtime hook that follows `/model`
+  switches and serves the matching overlay per session. `./setup --claude-model`
+  is install-wide, so a mid-session switch keeps the installed overlay. Builds on
+  the `--claude-model` render and activation record. Priority P3.
 
 ### P2/P3: impeccable interop deferrals (filed 2026-09-08, from the CEO + eng reviews of docs/designs/IMPECCABLE_INTEROP.md)
 
@@ -1099,22 +1292,12 @@ behind the secret. **Risk:** a long-lived credential in CI.
 
 **Effort:** S. **Priority:** P3.
 
-### P1: skillify gate test red — HOME-override sessions never discover project skills (pre-existing)
+### ✅ DONE (2026-10-03, v1.91.19.0 severe fix wave, I2): skillify gate test red
 
-**What:** `test/skill-e2e-skillify.test.ts` `skillify-provenance-refusal` fails
-on BOTH this branch and origin/main @ b5a951e6 (proven 2026-08-29: identical
-2-turn `Unknown skill: skillify` transcripts). Every test in that file passing
-`env: { HOME: workDir }` gets ZERO seeded project skills in the session init
-(claude CLI 2.1.237); the passing siblings recover by Reading the SKILL.md
-directly, the refusal test's agent stops at the Skill error. Fix the harness
-(seed skills wherever HOME-overridden discovery looks, or drop the HOME
-override and pass the write target another way), or report upstream if
-project-scope `.claude/skills` discovery genuinely keys off HOME.
-
-**Why:** A gate-tier safety test that is red for environmental reasons trains
-people to ignore gate reds.
-
-**Effort:** S-M (harness). **Priority:** P1 (gate hygiene).
+The gate `skill-e2e-skillify` cases (provenance-refusal, approval-reject,
+happy-path) passed in all 6 gate censuses 09-30..10-03 (latest
+https://github.com/garrytan/gstack/actions/runs/37151477069), and the periodic
+scrape-match-path and scrape-prototype-path cases passed 18/18 trials.
 
 ### P2: auq-verbose-vs-carved-ab PRE arm reads a branch-local ref (same fragility class the repetition-cut A/B just fixed)
 

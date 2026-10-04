@@ -12,7 +12,6 @@ allowed-tools:
   - Read
   - Glob
   - Grep
-  - Agent
   - AskUserQuestion
 gbrain:
   schema: 1
@@ -394,11 +393,21 @@ _ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
 D=""
 [ -n "$_ROOT" ] && [ -x "$_ROOT/.claude/skills/gstack/design/dist/design" ] && D="$_ROOT/.claude/skills/gstack/design/dist/design"
 [ -z "$D" ] && D="$HOME/.claude/skills/gstack/design/dist/design"
-if [ -x "$D" ]; then
-  echo "DESIGN_READY: $D"
-else
-  echo "DESIGN_NOT_AVAILABLE"
+_DS=$("$HOME/.claude/skills/gstack/bin/gstack-paths" --get GSTACK_STATE_ROOT 2>/dev/null); _DC=${_DS:+$_DS/design-ready}; _DK=$(ls -diL "$D" 2>/dev/null)
+_dt() { if command -v gtimeout >/dev/null; then gtimeout 10 "$@"; elif command -v timeout >/dev/null; then timeout 10 "$@"
+elif command -v perl >/dev/null; then perl -e 'alarm(shift);exec(@ARGV)' 10 "$@"; else return 125; fi; }
+_RC=0; _F="Fix: cd ${D%/design/dist/design} && ./setup"
+if [ ! -x "$D" ]; then _RC=missing
+elif [ ! "$_DC" -nt "$D" ] || [ "$(cat "$_DC")" != "$_DK" ]; then _dt "$D" --version >/dev/null 2>&1 </dev/null || _RC=$?
 fi
+case "$_RC" in
+  0) echo "DESIGN_READY: $D"; [ -n "$_DC" ] && echo "$_DK" > "$_DC" 2>/dev/null ;;
+  missing) echo "DESIGN_NOT_AVAILABLE: $D is not installed. $_F" ;;
+  124|142) echo "DESIGN_NOT_AVAILABLE: $D --version timed out after 10s" ;;
+  125) echo "DESIGN_NOT_AVAILABLE: no timeout/gtimeout/perl to bound $D" ;;
+  137) echo "DESIGN_NOT_AVAILABLE: $D --version exited 137 (killed at launch; on macOS usually an invalid code signature). $_F" ;;
+  *) echo "DESIGN_NOT_AVAILABLE: $D --version exited $_RC" ;;
+esac
 ```
 
 If `DESIGN_NOT_AVAILABLE`: skip visual mockup generation and fall back to the
@@ -410,12 +419,14 @@ Comparison boards are local HTML files: open them with `open file://...` on macO
 
 If `DESIGN_READY`: the design binary is available for visual mockup generation.
 Commands:
-- `$D generate --brief "..." --output /path.png` — generate a single mockup
-- `$D variants --brief "..." --count 3 --output-dir /path/` — generate N style variants
-- `$D compare --images "a.png,b.png,c.png" --output /path/board.html --serve` — comparison board + HTTP server
+- `$D generate --brief "..." --output /path.png` — generate a single mockup (prints `outputPath`)
+- `$D variants --brief "..." --count 3 --output-dir /path/` — generate N style variants (prints `paths`)
+- `$D compare --images-file /path/board-images.json --output /path/board.html --serve` — comparison board + HTTP server
 - `$D serve --html /path/board.html` — serve comparison board and collect feedback via HTTP
 - `$D check --image /path.png --brief "..."` — vision quality gate
 - `$D iterate --session /path/session.json --feedback "..." --output /path.png` — iterate
+
+Image commands never overwrite (a taken name gets `-2`) and always print JSON (`requested`, `saved`, `failures`); exit 0 ready, 2 nothing saved, 3 stopped after saving some. Capture without `set -e`: `_OUT=$($D ...); _RC=$?`.
 
 **Path rule:** Design artifacts belong in `$GSTACK_STATE_ROOT/projects/$SLUG/designs/`.
 Use `bin/gstack-paths` (docs/state-root.md). Keep it even if temporary; never substitute
@@ -529,9 +540,9 @@ designs to bias generation toward the user's demonstrated taste.
 Read this project's taste profile:
 
 ```bash
-SLUG=$("~/.claude/skills/gstack/bin/gstack-slug" --get SLUG 2>/dev/null)
-[ -n "${SLUG:-}" ] || { echo "NO_TASTE_PROFILE"; exit 0; }
-GSTACK_STATE_ROOT=$("~/.claude/skills/gstack/bin/gstack-paths" --get GSTACK_STATE_ROOT); : "${GSTACK_STATE_ROOT:?gstack-paths failed; reinstall with ./setup or /gstack-upgrade}"
+SLUG=$("$HOME/.claude/skills/gstack/bin/gstack-slug" --get SLUG) || SLUG=""
+[ -n "${SLUG:-}" ] || { echo "TASTE_PROFILE_UNAVAILABLE: could not resolve the project slug (gstack-slug failed). Fix: run ./setup."; exit 0; }
+GSTACK_STATE_ROOT=$("$HOME/.claude/skills/gstack/bin/gstack-paths" --get GSTACK_STATE_ROOT); : "${GSTACK_STATE_ROOT:?gstack-paths failed; reinstall with ./setup or /gstack-upgrade}"
 _TASTE_PROFILE="$GSTACK_STATE_ROOT/projects/$SLUG/taste-profile.json"
 if [ -f "$_TASTE_PROFILE" ]; then
   # Schema v1: { dimensions: { fonts, colors, layouts, aesthetics }, sessions: [] }
@@ -545,6 +556,8 @@ else
 fi
 ```
 
+**If TASTE_PROFILE_UNAVAILABLE:** say so once; continue without a taste profile.
+
 **If TASTE_PROFILE_FOUND:** Parse the full JSON; malformed/unreadable uses the legacy fallback. After decay, rank each dimension by confidence * approved_count (or rejected_count); take three per kind. Count retained sessions (at most 50, not lifetime). Include in the brief:
 
 "Based on [number of retained sessions] recorded sessions, this user's taste leans toward:
@@ -552,7 +565,7 @@ fonts [top-3], colors [top-3], layouts [top-3], aesthetics [top-3]. Bias
 generation toward these unless the user explicitly requests a different direction.
 Also avoid their strong rejections: [top-3 rejected per dimension]."
 
-**Legacy fallback:** Glob `$GSTACK_STATE_ROOT/projects/$SLUG/designs/**/approved.json` (resolve the root with gstack-paths); Read the five newest. Use explicit feedback only, never infer fonts/colors from variant letters. No usable files: continue without a taste profile.
+**Legacy fallback:** Glob `$GSTACK_STATE_ROOT/projects/$SLUG/designs/**/approved.json` (resolve the root with gstack-paths); Read the five newest. To view an approved image, resolve it with `~/.claude/skills/gstack/bin/gstack-design-approved <approved.json>`. Use explicit feedback only, never infer fonts/colors from variant letters. No usable files: continue without a taste profile.
 
 **Conflict handling:** If the current user request contradicts a strong persistent
 signal (e.g., "make it playful" when taste profile strongly prefers minimal), flag
@@ -576,14 +589,16 @@ _TASTE=$(find "$GSTACK_STATE_ROOT/projects/$SLUG/designs/" -name "approved.json"
 ```
 
 If prior sessions exist, read each `approved.json` and extract patterns from the
-approved variants. Merge these into the taste-profile.json-derived signal — if the
+approved variants; resolve each approved image with `~/.claude/skills/gstack/bin/gstack-design-approved <approved.json>`
+(an error means that image is gone: skip it, never substitute another). Merge these into the taste-profile.json-derived signal — if the
 profile already says "user prefers Geist font" (from aggregated history), the
 approved.json files add the specific recent approval context.
 
 Limit to last 10 sessions. Try/catch JSON parse on each (skip corrupted files).
 
 **Updating taste profile after a design-shotgun session:** When the user picks a
-variant, call `~/.claude/skills/gstack/bin/gstack-taste-update approved <variant-path>`. When they
+variant, call `~/.claude/skills/gstack/bin/gstack-taste-update approved <approved image path>` (the
+`APPROVED_IMAGE` printed when approved.json is saved). When they
 explicitly reject a variant, call `~/.claude/skills/gstack/bin/gstack-taste-update rejected <variant-path>`.
 The CLI handles schema migration from approved.json, decay, and conflict flagging.
 
@@ -630,8 +645,8 @@ them, not one team on different days.
 
 Use AskUserQuestion to confirm before spending API credits:
 
-> "These are the {N} directions I'll generate. Each takes ~60s, but I'll run them all
-> in parallel so total time is ~60 seconds regardless of count."
+> "These are the {N} directions I'll generate. They run in parallel, so the whole set
+> typically takes about 60 seconds."
 
 Options:
 - A) Generate all {N} — looks good
@@ -661,71 +676,60 @@ console.log("GSTACK_STEP_OK");
 Then `cp "<ASIDE_DIR>/current.png" "$_DESIGN_DIR/current.png"` and Read it so the user
 sees what you're evolving from.
 
-**Launch N Agent subagents in a single message** (parallel execution). Use the Agent
-tool with `subagent_type: "general-purpose"` and `run_in_background: false` for each
-variant (parallel foreground calls in one message still run concurrently, and the
-comparison board needs every variant's result). Each agent is independent and handles
-its own generation, quality check, verification, and retry.
+**Generate every variant with one `$D variants --briefs-file` call.** Write one entry per
+confirmed concept to `$_DESIGN_DIR/briefs.json`: a JSON array of `{"brief": "<the full
+variant-specific brief>"}` objects, in concept order (A, B, C, ...), at most 7. When
+evolving, add `"screenshot": "<_DESIGN_DIR>/current.png"` to every entry. Then run this
+Bash call with `timeout: 600000` and wait for it to return. It stages in a fresh per-run
+directory: in sandboxed sessions `$D` output under `~/.gstack/` can abort ("The operation
+was aborted"), while the temp dir works.
 
-**Important: $D path propagation.** The `$D` variable from DESIGN SETUP is a shell
-variable that agents do NOT inherit. Substitute the resolved absolute path (from the
-`DESIGN_READY: /path/to/design` output in Step 0) into each agent prompt.
-
-**Agent prompt template** (one per variant, substitute all `{...}` values):
-
-```
-Generate a design variant and save it.
-
-Design binary: {absolute path to $D binary}
-Brief: {the full variant-specific brief for this direction}
-Output: /tmp/variant-{letter}.png
-Final location: {_DESIGN_DIR absolute path}/variant-{letter}.png
-
-Steps:
-1. Run: {$D path} generate --brief "{brief}" --output /tmp/variant-{letter}.png
-2. If the command fails with a rate limit error (429 or "rate limit"), wait 5 seconds
-   and retry. Up to 3 retries.
-3. If the output file is missing or empty after the command succeeds, retry once.
-4. Copy: cp /tmp/variant-{letter}.png {_DESIGN_DIR}/variant-{letter}.png
-5. Quality check: {$D path} check --image {_DESIGN_DIR}/variant-{letter}.png --brief "{brief}"
-   If quality check fails, retry generation once.
-6. Verify: ls -lh {_DESIGN_DIR}/variant-{letter}.png
-7. Report exactly one of:
-   VARIANT_{letter}_DONE: {file size}
-   VARIANT_{letter}_FAILED: {error description}
-   VARIANT_{letter}_RATE_LIMITED: exhausted retries
+```bash
+_VARIANT_TMP=$(mktemp -d "${TMPDIR:-/tmp}/gstack-variants-XXXXXXXX")
+_VARIANTS_JSON=$("$D" variants --briefs-file "$_DESIGN_DIR/briefs.json" --output-dir "$_VARIANT_TMP"); _RC=$?
+echo "$_VARIANTS_JSON"; echo "EXIT: $_RC"
 ```
 
-For the evolve path, replace step 1 with:
-```
-{$D path} evolve --screenshot {_DESIGN_DIR}/current.png --brief "{brief}" --output /tmp/variant-{letter}.png
-```
+The command starts the variants 1.5s apart, retries rate limits with backoff, regenerates an
+empty image once, runs the vision check on each image and regenerates once when it fails
+(both images are kept), and starts no new work after 9 minutes. It never overwrites an
+image. It prints one `VARIANT_<letter>_DONE`, `_FAILED` or `_RATE_LIMITED` line per variant
+on stderr and JSON on stdout. Each `variants[]` entry has `saved` (every image it saved, in
+order; the last is its pick), `operation`, `status`, `error`, `retryable` and
+`check.status` (`pass`, `fail` or `skipped`). Exit 0 means at least one variant was
+generated (read each status), 2 means nothing was saved, and 1 means the briefs file was
+invalid and nothing was billed (the error names the entry and field; fix it and rerun).
 
-**Generate to `/tmp/`, then `cp`:** in sandboxed sessions `$D generate --output` under
-`~/.gstack/` can abort ("The operation was aborted"), while `/tmp/` works.
+**Publish without overwriting.** Never `cp` or `mv` an image. For each variant, publish every
+path in its `saved` list, in order, with
+`FINAL=$(~/.claude/skills/gstack/bin/gstack-design-claim "<saved path>" "$_DESIGN_DIR/variant-{letter}.png")`.
+It never overwrites and prints the final (possibly bumped) path; use FINAL from here on and
+report every published path. A variant's last FINAL is its pick. If a claim fails, report the
+error; the staged image stays at its saved path.
 
 ### Step 3d: Results
 
-After all agents complete:
+After the command returns and its images are published:
 
-1. Read each generated PNG inline (Read tool) so the user sees all variants at once.
-2. Report status: "All {N} variants generated in ~{actual time}. {successes} succeeded,
-   {failures} failed."
-3. For any failures: report explicitly with the error. Do NOT silently skip.
-4. If zero variants succeeded: fall back to sequential generation (one at a time with
-   `$D generate`, showing each as it lands). Tell the user: "Parallel generation failed
-   (likely rate limiting). Falling back to sequential..."
-5. Proceed to Step 4 (comparison board).
-
-**Dynamic image list for comparison board:** When proceeding to Step 4, construct the
-image list from whatever variant files actually exist, not a hardcoded A/B/C list:
-
-```bash
-setopt +o nomatch 2>/dev/null || true  # zsh compat
-_IMAGES=$(ls "$_DESIGN_DIR"/variant-*.png 2>/dev/null | tr '\n' ',' | sed 's/,$//')
-```
-
-Use `$_IMAGES` in the `$D compare --images` command.
+<!-- design:round-accounting -->
+1. Round accounting first: this round's images are exactly the published paths (never a
+   directory listing; older rounds stay on disk). Tell the user: "{saved} of {N} paid images
+   saved in ~{actual time}", listing every published path. A `skipped` check is missing
+   automated coverage, not a pass: say so.
+2. For any failures: report explicitly with the error. Do NOT silently skip. Rerun each
+   failed variant with `retryable: true` once, using its own operation and brief:
+   `"$D" generate --brief "<brief>" --output "$_VARIANT_TMP/variant-<letter>.png"`, or for a
+   screenshot entry `"$D" evolve --screenshot "$_DESIGN_DIR/current.png" --brief "<brief>" --output "$_VARIANT_TMP/variant-<letter>.png"`.
+   Capture its JSON and exit code, then publish its `outputPath` with the claim helper.
+3. If zero variants succeeded: fall back to sequential generation, running `$D generate`
+   yourself one variant at a time into `$_VARIANT_TMP`, publishing each with the claim
+   helper and showing each as it lands. Tell the user: "Parallel generation failed (likely
+   rate limiting). Falling back to sequential..." If that also saves nothing, report the
+   failures and stop: no board.
+4. Read each published image inline (Read tool, the published paths) so the user sees all
+   variants at once.
+5. Proceed to Step 4 with each variant's pick (its last published path), in letter order,
+   as this round's board images.
 
 ## Step 4: Comparison Board + Feedback Loop
 
@@ -733,8 +737,12 @@ Use `$_IMAGES` in the `$D compare --images` command.
 
 Create the comparison board and serve it over HTTP:
 
+<!-- design:board -->
+Write this round's board images (printed paths that passed checks, in order) as a JSON array to `$_DESIGN_DIR/board-images.json` with the Write tool; board letters A, B, C follow that order. Then archive any earlier Submit so it cannot approve these images, and build the board:
+
 ```bash
-$D compare --images "$_DESIGN_DIR/variant-A.png,$_DESIGN_DIR/variant-B.png,$_DESIGN_DIR/variant-C.png" --output "$_DESIGN_DIR/design-board.html" --serve
+[ -f "${_DESIGN_DIR:?set _DESIGN_DIR to the design dir printed above}/feedback.json" ] && mv "${_DESIGN_DIR:?}/feedback.json" "${_DESIGN_DIR:?}/feedback-$(date -u +%Y%m%dT%H%M%SZ).json"
+$D compare --images-file "$_DESIGN_DIR/board-images.json" --output "$_DESIGN_DIR/design-board.html" --serve
 ```
 
 Creates HTML and opens the board. **Run it in the background** (host task, or `&` redirecting stdout/stderr to private files in `$_DESIGN_DIR`). Read captured stderr for the startup marker; a PID is not readiness. Missing marker: use the failure fallback below.
@@ -793,8 +801,8 @@ the approved variant.
 1. Read `regenerateAction` from the JSON (`"different"`, `"match"`, `"more_like_B"`,
    `"remix"`, or custom text)
 2. If `regenerateAction` is `"remix"`, read `remixSpec` (e.g. `{"layout":"A","colors":"B"}`)
-3. Generate new variants with `$D iterate` or `$D variants` using updated brief
-4. Create new board: `$D compare --images "..." --output "$_DESIGN_DIR/design-board.html"`
+3. Generate new variants with `$D iterate` or `$D variants` using updated brief (capture the JSON and do round accounting as for the first round)
+4. Rebuild with the board block above (it archives feedback.json and rewrites board-images.json), without `--serve`
 5. Reload the board in the user's browser (same tab) — the URL is per-board
    under daemon mode, so use `<BOARD_URL>` (from the `BOARD_URL:` stderr
    line) as the base:
@@ -828,9 +836,16 @@ Is this right?"
 
 Use AskUserQuestion to verify before proceeding.
 
-**Save the approved choice:**
+**Save the approved choice.** Map the confirmed letter through this board's `board-images.json` (never the directory listing) and save it:
+
 ```bash
-echo '{"approved_variant":"<V>","feedback":"<FB>","date":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","screen":"<SCREEN>","branch":"'$(git branch --show-current 2>/dev/null)'"}' > "$_DESIGN_DIR/approved.json"
+_IMG=$(jq -r --arg v "<VARIANT>" '.[($v | explode[0]) - 65] // empty' "$_DESIGN_DIR/board-images.json")
+if [ -n "$_IMG" ]; then
+  echo '{"approved_variant":"<VARIANT>","approved_path":"'"$(basename "$_IMG")"'","feedback":"<FEEDBACK>","date":"'$(date -u +%Y-%m-%dT%H:%M:%SZ)'","screen":"<SCREEN>","branch":"'$(git branch --show-current 2>/dev/null)'"}' > "$_DESIGN_DIR/approved.json"
+  echo "APPROVED_IMAGE: $_IMG"
+else
+  echo "NO_BOARD_IMAGE: <VARIANT> is not on this board; reselect from the board"
+fi
 ```
 
 ## Step 5: Feedback Confirmation
@@ -854,7 +869,8 @@ Use AskUserQuestion to confirm before saving.
 Write `approved.json` to `$_DESIGN_DIR/` (handled by the loop above).
 
 If invoked from another skill: return the structured feedback for that skill to consume.
-The calling skill reads `approved.json` and the approved variant PNG.
+The calling skill reads `approved.json` and resolves the approved image with
+`~/.claude/skills/gstack/bin/gstack-design-approved "$_DESIGN_DIR/approved.json"`.
 
 If standalone, offer next steps via AskUserQuestion:
 

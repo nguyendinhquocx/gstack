@@ -1,5 +1,69 @@
 # Changelog
 
+## [1.91.70.0] - 2026-10-10
+
+**gstack runs unattended for a parent agent: one artifact contract a parent can validate, an `unattended` session kind that never prompts or syncs, a review log whose status is derived from its findings, and a gate list that is written, never auto-approved.**
+
+Parent agents running gstack on a subagent machine had no way to tell a finished `/autoplan` from an interrupted one, no session kind that meant "nobody is at the keyboard but this is not CI", and a review log whose `clean` status could disagree with its own findings. This release is the first half of the multi-agent wave (`docs/designs/MULTI_AGENT_WAVE_2026_10_10.md`, PR B-core).
+
+### What this means for you
+
+- **`GSTACK_SESSION_KIND=unattended`** is a fourth session kind, honored only as the explicit override. It suppresses every prompt and publication the way `spawned` does and also skips the telemetry writer, the artifacts sync and the brain spool with an explicit line each (`TELEMETRY_WRITE: skipped`, `ARTIFACTS_SYNC: skipped (unattended session; …)`), whatever settings the machine inherited. `headless` keeps its BLOCK meaning, so no eval case changes.
+- **Every run prints `STATE_ROOT: <path> durable=yes|no`.** With `GSTACK_EPHEMERAL=1` set by the host, an unattended run says `learnings: skipped (state root is ephemeral; set GSTACK_STATE_ROOT)` instead of writing to a disk that will vanish.
+- **`/autoplan` unattended writes a run directory** (`run.json`, `decisions.jsonl`, `findings.jsonl`, `tasks.jsonl`, `timing.json`, `plan.md`, `review-record.md`) and ends with `GSTACK_RESULT: skill=autoplan status=gate_pending run=<dir>`. `gstack-artifact validate run.json` is the one deterministic completion check; it fails on an interrupted run, a missing reviewer, a stale artifact, a findings count that disagrees with the file, duplicate ids, dependency cycles or a path that escapes the run directory. `docs/unattended.md` shows the six-step parent flow with `jq` and `grep`.
+- **The final gate is one list with one reply grammar** (`all`, `<id><option>`, `all except …`), stable ids across pages, `auto` versus `approval` items, and a `gate_rev` that rejects a stale reply with no writes. Unattended runs never approve their own gate.
+- **`## URGENT, outside this plan`** is the fixed first block of every autoplan report and plan, `None.` when nothing was raised.
+- **Review-log rows derive their status from findings.** `gstack-review-log --findings <path>` computes `status`, `unresolved`, `issues_found`, `critical_gaps`, `findings_total/open/resolved` from the file and rejects a row whose claimed values disagree (`REVIEW_STATUS_MISMATCH`, exit 1; usage is exit 2).
+- **Timing.** Phase 0 prints an estimate from your last ten runs (`no history` when empty) and the report prints the actual whole-cycle time next to it.
+- On hosts that do not execute hooks, `/autoplan` prints `autoplan guard: not enforced by this host; publication order is unverified (GUARD_NOT_INSTALLED)` once; Claude Code's deny-on-absent hook is unchanged.
+
+### Itemized changes
+
+#### Added
+- `lib/headless-artifacts.ts` (schemas, `validateRun`, `ackRun`, `GSTACK_RESULT` grammar, shared exit table) and `bin/gstack-artifact validate|schema|ack|urgent [--json]`.
+- `lib/result-codes.ts`: reason codes with `docs/troubleshooting.md` anchors and `fix:` clauses for every new error line (`ARTIFACT_*`, `GUARD_NOT_INSTALLED`, `REVIEW_STATUS_MISMATCH`, `GATE_REV_STALE`, `GATE_REPLY_UNPARSED`).
+- `lib/gate-list.ts` and `bin/gstack-gate render|parse|decisions`.
+- `lib/autoplan-timing.ts` and `bin/gstack-autoplan-timing start|close|estimate|summary`; analytics at `<state root>/analytics/autoplan-timing.jsonl`, skipped with a printed line on an ephemeral root.
+- `docs/unattended.md`; reference run under `test/fixtures/multi-agent-wave/reference-run/`.
+
+#### Changed
+- `bin/gstack-session-kind` and `bin/gstack-skill-start`: `unattended` whitelisted; an unknown kind prints `SESSION_KIND: interactive (unknown kind '<x>')`; `STATE_ROOT`, `UNATTENDED_SESSION`, telemetry, sync and brain-spool skips; `bin/gstack-skill-end` emits a cached one-line upgrade notice instead of draining.
+- `lib/review-evidence.ts`: `bindReview` validates a findings file before consuming the start token; `reviewFreshness` reads `findings_open`; legacy counters keep their conservative reading.
+- `autoplan/SKILL.md.tmpl` and `phase-close`: run id and estimate in Phase 0, gate list and URGENT block in Phase 4, timing on close. Union bytes shrank on every skill (autoplan −163); nothing grew.
+- Preamble and `auq-error-fallback-hook`: unattended resolves the recommended option and logs it.
+
+#### For contributors
+- New tests: `test/headless-artifacts.test.ts`, `test/gate-list.test.ts`, `test/autoplan-timing.test.ts`, `test/review-log-findings.test.ts`; `test/gstack-skill-start.test.ts` gains an instrumented egress test (telemetry, sync and update-check sinks receive zero calls under unattended, all three under interactive).
+- `CARVE_GUARDS` autoplan `gateAfterStop` marker now keys on the gate file write; golden ship renders refreshed.
+
+## [1.91.69.0] - 2026-10-10
+
+**/cso eval cells now get time to finish their report, keep their spend when they run out of time, and stop mislabeling the helper's own files as secrets.**
+
+The first paid smoke cells that ran real scanners both ended as `REDACTION_FAILED` with no usage and no artifacts after the full 30 minutes. There were three causes.
+
+- **Every artifact path tripped the secret check.** The helper names each run `<epoch ms>-<hex>`, and the secret redactor reads a 13-digit epoch as a phone number. Some 32-hex review IDs also read as wallet addresses. So the first run that actually wrote artifacts failed the post-run inventory, every time.
+- **The provider was killed at the budget.** The producer stopped Claude at exactly `--budget` after the cell started. The helper's own deadline is the budget after `start`, and its `finish` writes the report after that deadline. Both agents started the helper within 30 seconds, worked until the deadline, and were killed before they could call `finish`.
+- **A kill threw the spend away.** `--output-format json` reports usage only when Claude exits, so a timeout recorded zero tokens.
+
+### What this means for you
+
+- Helper artifact names are checked against the helper's layout: `<repoId>/<runId>/...`, `public-cache/` and `legacy-imports/`. A path component that is wholly a helper identifier is accepted by its shape. Every other component, including source paths mirrored under `snapshot/` and `readable/`, still goes through the secret redactor.
+- The producer gives the provider the budget plus 300 seconds of reporting time (`PRODUCER_REPORTING_GRACE_SECONDS`, the evaluator's frozen `graceSeconds`). The helper still refuses evidence after its deadline, so the measured budget is unchanged. The agent just gets to call `finish`, as a user's agent would.
+- Claude producers stream events (`stream-json --verbose --include-partial-messages`) and add up usage message by message. A timed-out receipt carries its tokens, estimated cost, turns and the agent's last text, marked `failed` with `timeout`. A run with no successful, nonblank final result still fails.
+- A failed post-run check now names the check in the receipt's reason, for example `artifact inventory check: ...`. A redaction rejection says which component failed and never includes the component itself.
+
+### Itemized changes
+
+#### Fixed
+- `inventoryProducerArtifacts` validates paths with `assertProducerArtifactPath`. Paths outside the helper layout fail as `INVALID_PRODUCER_ARTIFACTS`. A component that looks like a secret fails as `REDACTION_FAILED` with its position and masked parent.
+- `runProducerCell` passes `producerProviderTimeoutMs(budget)`, which is the budget plus 300 s. Integrity failures read `<check> check: <detail>`, and add the provider's own error code when there was one.
+- The Claude producer runs through `runClaudeProducerStream` in `test/helpers/providers/claude-stream.ts`. It folds the event stream as it arrives, so no output buffer can overflow. It resolves even when a grandchild holds stdout, and keeps the `Command failed: <command> <args>` reason on a nonzero exit. Non-producer Claude evals are unchanged.
+
+#### For contributors
+- `test/claude-producer-stream.test.ts` covers stream accounting, the paid result contract, a timed-out stub, and nonzero and clean exits. `test/cso-eval.test.ts` covers the real helper layout (an epoch run ID and a wallet-shaped review ID), a planted secret-shaped file name, and a timed-out receipt that keeps its usage.
+- The evaluator's cells need a matching change: an outer timeout of the budget plus 600 s, and the new Claude flags in the stub preflight prefix.
+
 ## [1.91.68.0] - 2026-10-08
 
 **Claude /cso eval cells run the real scanners again, never break their own source check, and still record what they spent when a post-run check fails.**

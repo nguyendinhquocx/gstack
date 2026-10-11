@@ -1,5 +1,347 @@
 # Changelog
 
+## [1.91.92.0] - 2026-10-11
+
+**Outside reviews honor `codex_reviews` at the send, not in skill prose. Codex reasoning effort is a setting, and the README says what leaves your machine.**
+
+- **Consent in the binaries (#3102).** `gstack-codex-probe run-with-timeout`, `gstack-claude-code`, `gstack-outside-voice run` and the unattended `/autoplan` runner read `codex_reviews` before anything starts. When it is `disabled`, or the config can't be read, or the value is unknown, they refuse with `not_run` / `consent_missing` (exit 3). The refusal prints the fix command and links the `outside-review-consent-missing` troubleshooting anchor. `/ship` design-lite and `/design-review` no longer hard-code consent, so `codex_reviews=disabled` now stops them too. `/codex` and `/claude-code` pass `--user-invoked` because you asked for those reviews by name. `gstack-config get --stored <key>` prints `enabled`, `disabled`, `unset` or `unreadable` (exit 2).
+- **Reasoning effort (D1-A, #3098, closes #2934).** `run-with-timeout --effort <default>` uses `GSTACK_CODEX_EFFORT` first, then `gstack-config set codex_effort <level>`, then the gate's own default, and appends `model_reasoning_effort`. An invalid level stops before any Codex call. `/codex ... --xhigh` sets the env for that dispatch. `/spec` keeps `medium` inside its 120 s budget. `gstack-models list` shows the effective effort.
+- **Privacy text (#1081, #1080, #1150).** The README's Privacy & Telemetry section now lists:
+  - the telemetry fields and what is never sent
+  - the local `skill-usage.jsonl` (repo and branch are stripped before upload)
+  - the update check, which goes to GitHub
+  - outside-review egress and its first-send notice
+  - session markers and the timeline, which stay local
+
+  The telemetry prompt and the `gstack-config` header match it.
+
+Thanks @Lockyer228 (#3098) for the `GSTACK_CODEX_EFFORT` precedence and its probe tests, and @lubosxyz (#2934) for the original env override.
+
+## [1.91.91.0] - 2026-10-11
+
+**Review gates fail closed: a Codex reply that lists P1 findings is never `clean`, /autoplan survives a Claude Code auto-compaction, and a read-only /plan-eng-review finishes `DONE` instead of `BLOCKED` (Wave 9 lane B).**
+
+- **Outside-review severities (#3105).** `lib/outside-review-result.ts` now reads P0-P3 labels in label position for every gate that summarises a review, the `execution` gate behind `/codex` consult and challenge included: `**P1 — x**`, `**P1** — x`, `1. P2 — x`, a bare `P2 —`, `### P1` and table cells `| P1 |`, plus the label-position severity words that only `review`/`structured` read before. A P0-P3 token in label position that none of these forms reads (`## P1/P2 findings`) is `VERDICT: unverified` with the new reason `unparsed_severity`, an `UNPARSED: line N: "..."` line and its own troubleshooting anchor; parsed P0/P1 findings still win (exit 3) and print the unparsed line too. A reply whose last `Verdict:` line says `not ready` with no readable severity prints `FINDINGS: unspecified` and exits 3. Code fences and inline code are quotes, not labels; an unlabeled consult answer stays `clean`.
+- **Post-compaction journals (#3107).** Claude Code 2.1.293 writes the kept conversation again after an auto-compaction boundary: new uuids, relinked parents, zeroed usage, identical otherwise. The owned journal reader (`lib/claude-owned-journal.ts`) now collapses such a copy into its pre-boundary original for every record kind, so the publication guard no longer denies every phase entry with `tool_identity`, a copied `/autoplan` prompt no longer trips `init_own`, and a copied end turn plus typed prompt no longer disarms the guard. A copy that differs in anything else, or a duplicate with no boundary between, still fails closed.
+- **Read-only /plan-eng-review (#3106).** When the caller forbids writing the report or the review log, the review now follows **Report-back outcome**: it returns the full report and ledger labeled not persisted, records telemetry `success`, ends `DONE` with `PERSISTED: no`, and its last line is `PERSIST: <gstack-review-log command>` for the caller to run. No new completion status; a failed permitted save is still `BLOCKED`. With no saved Eng Review, /ship's readiness dashboard now says to run that `PERSIST:` line or rerun the review.
+
+Thanks @kolla23 (#3105)
+Thanks @kolla23 (#3106)
+Thanks @Mr-B-1 (#3107)
+
+## [1.91.90.0] - 2026-10-11
+
+**Windows checkouts stop breaking gstack's nested shell scripts on Linux, the timeline Stop hook repairs on Windows instead of timing out every turn, and the `/setup-gbrain` smoke test stops piping into `gbrain put`.**
+
+### What this means for you
+
+- **Nested scripts are LF everywhere (#3110).** `.gitattributes` pinned only the top-level `bin/` to LF, so Git for Windows (`core.autocrlf=true`) wrote skill `bin/` helpers, the Claude hook shims, `lib/cso/images/*` and `scripts/app/*` with CRLF. A Linux bash reading that checkout (a synced tree, WSL, a bind mount) failed with `set: pipefail: invalid option name`, and `/autoplan`'s publication hook exited 2, blocking every phase entry. Every tracked `#!` file now resolves to `eol=lf`.
+- **`./setup` repairs existing CRLF copies.** Pulling the new rule does not rewrite a file whose content did not change, so setup finds tracked files whose rule says LF but whose copy has CRLF and checks them out again as LF. A file you edited is left alone and named, with the command that rewrites it and keeps your edit (`docs/troubleshooting.md#setup-crlf-repair`).
+- **The timeline Stop hook returns at once and repairs (#3103).** Through Git Bash, `gstack-slug` took 2.2-2.8 s against the hook's 2 s budget, so on Windows the hook spent about 2.5 s on every turn and repaired nothing. It now reads the slug from gstack-slug's cache in-process (`GSTACK_PROJECT_SLUG` still wins). On a miss a hidden background process resolves the slug and repairs, one at a time under a lock, and a directory it cannot resolve is retried after 5 minutes instead of every turn.
+- **The `/setup-gbrain` smoke test writes the page to a temp file (#1675)** and runs `gbrain put "$SLUG" < file`, the shape gstack's other `gbrain put` instructions already use.
+
+### For contributors
+
+- `test/gitattributes-eol.test.ts` checks `git check-attr eol` for every tracked `#!` file and that no file git stores as binary is marked text (`*.icns` is now `binary`, since `scripts/app/*` would otherwise cover the app icon).
+- `test/setup-crlf-repair.test.ts` builds the broken state with a real `core.autocrlf=true` clone, runs setup's repair under the install registry lock, checks the repaired bytes and runs the hook.
+- `test/timeline-stop-hook-slug.test.ts` runs a copy of the hook against a slow stub `gstack-slug` and is force-included in the Windows lane. Native Windows latency is measured only if that lane runs it.
+
+Thanks @Mr-B-1 (#3110)
+Thanks @Peaky8linders (#3103)
+Thanks @ElliotDrel (#1675)
+
+## [1.91.89.0] - 2026-10-11
+
+**Windows installs stuck on the Git Bash hook false positive get a one-line recovery, the auto-updater stops trusting only its own checker, and setup can no longer delete the checkout it runs from.**
+
+Since 1.91.31, `gstack-hook-check` on Windows (Git Bash) reported every TypeScript hook as `bun could not bundle the TypeScript entry`: Git Bash hands native Bun `C:/…` paths while the checker looked them up as `/c/…`. Setup refused the hooks, and team-mode auto-update held every later release because it re-checked each one with the broken installed checker. Code on main cannot reach those installs, so the troubleshooting page their messages link to now carries the recovery.
+
+### What this means for you
+
+- **Stuck on Windows?** Run `cd ~/.claude/skills/gstack && git pull --ff-only --autostash && ./setup` (your install directory if it differs). It clears the setup refusal, the held auto-update and `/gstack-upgrade`'s `is not a gstack checkout` refusal. `docs/troubleshooting.md#auto-update-hook-does-not-parse` and `#setup-hook-does-not-parse` say so instead of "Nothing to do locally".
+- **The hook check reads both path spellings.** Bun's entry, input and error paths are mapped back to Git Bash's spelling, so healthy hooks pass and a real syntax error still fails with its own file and line.
+- **One checker bug can't hold every release again.** The auto-updater runs the incoming release's own `bin/gstack-hook-check` on the extracted archive. Only a verified, complete report counts; a crash, empty output or unreadable report falls back to the installed checker, and when neither gives one the update is held as `hook-check-unavailable` with the fix command. A pass the installed checker disputes is logged as `HOOK_CHECK_DISAGREE`.
+- **`/gstack-upgrade` and `/spec` work in Git Bash.** Their checkout-root guards check `git rev-parse --show-prefix` instead of comparing `--show-toplevel` (`C:/…`) with `pwd -P` (`/c/…`); a static test rejects the old comparison in skill bash.
+- **`/review` and `/ship` record a start in a linked worktree on Windows.** `gstack-wtree` treats Git for Windows' `C:/…` `--git-path` answers as absolute (#3101).
+- **Setup never replaces a runtime root that holds its own checkout (#3084).** With the checkout at `~/.cursor/skills/gstack`, `./setup --host cursor` used to swap the Cursor runtime root in over it and delete it. Setup now refuses before writing anything (and again in `_activate_runtime_root`, which every host arm that swaps a root goes through; Kiro, which writes into its root in place, is refused too), prints the commands that move the checkout out, and `./setup --status` suggests that move instead of the destructive command. The install summary says "previous install was left in place" only after checking that the checkout, skills directory and runtime root still exist.
+
+### For contributors
+
+- `bin/gstack-path-spelling.sh` (shell spelling, native spelling, same-path, absolute, within) and its TS twin `lib/path-spelling.ts` own the `/c/…` vs `C:/…` class; only this release's call sites moved to them.
+- The Windows lane force-includes `test/setup-hook-syntax-gate.test.ts`; `windows-setup-e2e` runs the hook check on the checkout, the upgrade guard, and the documented recovery from a release with the false positive.
+
+Thanks @yuriysan (#3112)
+Thanks @szsunyuan (#3108, #3128)
+Thanks @dmfrede (#3101)
+Thanks @skleinbe-ny (#3088)
+Thanks @bkermen (#3100)
+Thanks @andrewkjankowski (#3084)
+
+## [1.91.88.0] - 2026-10-11
+
+**Transcript ingest lands on gbrain 0.60, and `/retro global` counts every Claude Code session in its real repository.**
+
+- **Transcript sources get a checkout (#3097).** gbrain 0.60's managed persistence refuses any import into a source with no active worktree binding on this host, and gstack registered every transcript source path-less, so every transcript page was refused (`owner_unavailable`) on every run. On a managed brain each transcript source is now bound to its own checkout, `<state root>/gbrain-transcript-sources/<source-id>/`, created by gstack as a git repository of its own (so gbrain binds that directory and never an enclosing checkout such as a brain-synced state root). A path-less source an earlier run registered is bound on the next run, the same way `gbrain sources add <id> --path` attaches a path to it; a resumed timeout checkpoint is admitted the same way before it imports. After each import the checkout holds one commit, the current page files, amended in place with no reflog so `git gc --auto` prunes old snapshots; it stays uncommitted while any page in the source lacks its file, so `gbrain sync` of the source can never soft-delete those pages. gstack never binds a source someone else holds (another host, or another directory on this host) and prints the owner, the inspect command and the release or re-bind commands, and it binds nothing under an ephemeral state root (`GSTACK_EPHEMERAL=1`). Classic (unmanaged) brains keep path-less sources, unchanged.
+- **global-discover reads the session's own cwd (#1315).** Claude Code project directories were decoded by turning every `-` into `/`, which fails for every hyphenated path, and the cwd fallback read a 64 KB prefix that recent sessions' first record outgrows. Each session's cwd is now read from its own JSONL, whole lines up to 1 MiB (a longer line is skipped and counted in a warning), and resolved through git to its worktree root: root and subdirectory sessions count the same, linked worktrees count with their repository, a nested repository counts as itself, and sessions outside a repository are not counted as one.
+
+Thanks @Simba3696 for the root-cause diagnosis (#3097).
+Thanks @Akagilnc for the two-bug diagnosis and measurements (#1315).
+
+## [1.91.87.0] - 2026-10-11
+
+**The paid CSO producer gives `/cso` the Agent tool users have, so independent review and repair verification can run in the evaluation. The producer's receipt now counts subagent tokens.**
+
+The current-skill smoke reports (run 38090891646) said repair verification was "not performed": `record-review` refused the review with "Repair review must be explicitly independent". The producer started Claude with `--tools Bash,Write`, so the Agent tool was missing. `/cso` could start no independent reviewer, honestly declined to attest independence, and so every repair stayed `not_attempted`. Users' Claude Code has the Agent tool. The v2 skill's parallel finding verification uses it too, and fell back to self-verification in the v2 baseline for the same reason.
+
+### What this means for you
+
+- **The producer allows `Bash,Write,Agent`.** Subagents inherit the whole policy. Claude Code 2.1.263, replayed against a mock API through the real producer, shows this in practice:
+  - A subagent has only Agent, Bash and Write, and no MCP servers.
+  - Its launcher calls run unsandboxed and reach Docker. Its other Bash is denied, including chained, path-variant and `dangerouslyDisableSandbox` commands.
+  - `--restricted` keeps its Write calls inside the producer's work and helper directories.
+  - Read, WebFetch, ListMcpResourcesTool and `mcp__*` tools are unavailable to it.
+  - A subagent's `record-review` is accepted (`self_attested`), and `verify` then passes the review check.
+- **Policy revision `claude-2.1.263-cso-v2`.** The tool set changed, so the producer policy identity changed with it. A recorded v2 baseline bound to `cso-v1` no longer matches, and the baseline must be measured again under this policy.
+- **Subagent tokens are counted.** A `result` event's `usage` covers only the main thread's last turn. The receipt now takes the session total from `modelUsage` and sums turns across every `result`. A background subagent gives the main thread a second result. A killed run also counts the subagent messages it streamed.
+
+### Itemized changes
+
+#### Changed
+- `test/helpers/providers/claude.ts`: `--tools Bash,Write,Agent` (`CLAUDE_PRODUCER_BUILTIN_TOOLS`). `assertClaudeProducerSandboxPolicy` also pins `--tools`, `--permission-mode dontAsk` and exactly one each of `--restricted`, `--safe-mode` and `--strict-mcp-config`. It refuses `--mcp-config`, `--agents`, `--plugin-dir`, `--setting-sources`, `--disallowed-tools` and the permission-bypass flags.
+- `test/helpers/providers/claude-stream.ts`: tokens from `modelUsage`, turns summed over results, subagent messages counted once by message id, and only main-thread text kept as a killed run's output.
+- `scripts/cso-eval-producer.ts`: Claude policy revision `claude-2.1.263-cso-v2`.
+
+#### For contributors
+- `test/provider-model-defaults.test.ts`: the tool list and each new policy refusal.
+- `test/claude-producer-stream.test.ts`: subagent accounting with the event shapes Claude Code 2.1.263 printed in the replay, including a background subagent's second result and a killed run.
+
+## [1.91.86.0] - 2026-10-11
+
+**browse follows the proxy your shell already uses, writes PDFs on Windows machines whose temp dir is an 8.3 short path, and stops spawning `--config=NUL` children that crashed Bun 1.3.10 (Wave 9, lane E).**
+
+### What this means for you
+
+- **Proxy from the environment (#915).** Without `--proxy`, browse takes the proxy from `BROWSE_PROXY_URL`, then `HTTPS_PROXY`, `HTTP_PROXY` and `ALL_PROXY` (upper case before lower case). `BROWSE_PROXY_URL=direct` opts out. `NO_PROXY` becomes Chromium's bypass list, and loopback is always bypassed. The proxy and the `NO_PROXY` rules are part of the daemon config, so a session with a different environment is refused with the variable named instead of silently reusing a daemon that routes differently. The refusal offers `browse stop`, which now stops any daemon whatever its proxy or headed settings. A standard variable that doesn't parse (curl-style `host:port`) prints a warning and browse connects directly; a bad `--proxy` or `BROWSE_PROXY_URL` still fails, so a typo never quietly exposes your IP. `socks5h://` works as `socks5://`. See BROWSER.md, "Proxy from environment".
+- **8.3 temp paths on Windows (#3104).** `make-pdf` and `browse pdf` failed with `Path must be within: C:\Users\BURCIN~1\...` because the safe directories and the target went through different realpath functions. Both sides now use one (`fs.realpathSync.native`), resolved paths compare exactly, and only a tail that doesn't exist yet is case-folded on Windows.
+- **No more Bun crash windows on Windows (#3085).** The terminal agent, the native-cookie supervisor and its worker passed `--config=NUL`, which panicked Bun 1.3.10 at flag parsing; the respawn loop turned that into a crash window every few seconds. All three now get an empty `bunfig.toml` created in a private directory and re-checked to be zero bytes before each spawn. POSIX keeps `/dev/null`.
+
+### Itemized changes
+
+#### Changed
+- `browse/src/proxy-config.ts`: `resolveProxy` (precedence, `direct`, cred policy for env URLs, warning fallback), `noProxyToChromiumRules`, `withLoopbackBypass`, `serverProxyEnv`; `socks5h` accepted as `socks5`; `computeConfigHash` takes the `NO_PROXY` rules (unchanged hash when there are none).
+- `browse/src/cli.ts`: resolved proxy source and bypass reach every server launch (start, crash restart, headed connect and its supervisor); the startup line names the source; `proxyMismatchLines` refusal; `browse stop` skips the config-mismatch check.
+- `browse/src/server.ts`, `browse/src/browser-manager.ts`: Chromium gets the bypass rules; the state file records the redacted proxy, its source and its bypass.
+- `browse/src/path-security.ts`: `resolveRealPath`, one realpath for safe directories and targets. `browse/src/write-commands.ts`: `cookie-import` uses `validateReadPath`.
+- `browse/src/bun-child-config.ts`: `emptyBunConfig()`; `bunChildFlags()` replaces `BUN_CHILD_FLAGS`.
+
+#### For contributors
+- `browse/test/proxy-env.test.ts`, `browse/test/proxy-env-daemon.test.ts` (a local proxy across launch, reuse, a NO_PROXY-only change, `direct` and restart), `browse/test/path-security-realpath.test.ts`, `browse/test/bun-child-config.test.ts`.
+
+Thanks @ningfeemic-dev (#916)
+Thanks @bkermen (#3104)
+Thanks @adammartin0087 (#3085)
+
+## [1.91.85.0] - 2026-10-11
+
+**`/cso` works on Windows Git 2.56 and gets Docker on macOS, `/test-audit` and `/ship` loop correctly under zsh, and the deploy skills stop at the honest point (Wave 9 Lane D).**
+
+- **`/cso` on Git for Windows 2.56.** Every CSO Git child, and the eval fixture and producer identity reads, now set `GIT_CONFIG_GLOBAL=/dev/null` on every platform. Git 2.56 rejects `NUL` there ("unable to access 'NUL'"), so `/cso` could not read any repository on Windows and `doctor` reported `static-snapshot: missing`. `GIT_CONFIG_NOSYSTEM=1` stays, POSIX is unchanged, and a new free test that also runs in the Windows CI shards proves `git config --global --list` is empty under the CSO environment. Thanks @Alfabit7 (#3082).
+- **`/cso` admits the local Docker socket on macOS.** Bun's `realpathSync` opens its target to resolve it, and a Unix socket throws `EOPNOTSUPP`, so every macOS run rejected Docker and fell back to static-only. On exactly that error the socket path is now resolved without opening it (canonical parent plus `lstat`/`readlink`); the endpoint must still be a local `unix://` socket pinned by device and inode, TCP and SSH endpoints are still rejected, and Linux takes the unchanged path. The registry-broker socket mount uses the same resolver. Thanks @nathanshox (#3094).
+- **zsh-safe file loops.** `/test-audit`'s near-duplicate seed and `/ship`'s base-control fixture copy looped with `for f in $VAR`, which zsh (the Bash tool's shell on macOS) runs once with the whole list. Both now split the list explicitly, and a static test rejects any generated bash block that loops over an unquoted variable. Thanks @vilano93 (#3109).
+- **`/setup-deploy` stops when nothing is live yet.** The deploy-trigger question separates "nothing is deployed yet" from "this project never deploys". The first stops and writes nothing, telling you to bring the site up with the platform's own tool and re-run `/setup-deploy`; the second still records the `none` configuration. Thanks @mikehasa (#3095).
+- **`/land-and-deploy` runs a recorded command trigger only with approval.** When Deploy Configuration records a command as the deploy trigger, Step 5 says production has not moved, names the command and asks you to run it, or runs it only with your explicit approval, before polling for a deployment tied to the merge; a zero exit is not revision proof. Thanks @mikehasa (#3096).
+- **TODOS.md** records the Wave 9 triage: the remaining open P2/P3 bugs by area with their root-cause files and sizes, the parked items (#2118, #2623, #3061, #3084's legacy Cursor folders, #1315's session wording, the `gbrain put` stdin pipe from #1675) and the 73 feature requests grouped into twelve themes with counted demand.
+
+## [1.91.84.0] - 2026-10-11
+
+**A paid CSO baseline can be scored, and it measures what audits found. Three producer/scorer mismatches made gstack's own collect reject every real producer receipt from the first full baseline. Collect and score now accept real receipts of every kind, a test feeds them through, and findings count from every finished report, with completeness kept as its own measured rate.**
+
+The first full paid v2 baseline produced 64 receipts and 64 judge records, then scored `unmeasured` with `INVALID_PRODUCER_RECEIPT`. Run against that run's retained artifacts, collect failed on three separate mismatches in turn:
+
+1. **Artifact order.** The producer sorted its artifact inventory with `localeCompare`, so `package.json` came before `README.md`. Collect required strict code-unit order, and 62 of 64 receipts failed.
+2. **Per-platform catalog bytes.** Next came `UNMATCHED_PRODUCER_INSTALLATIONS`. Each platform's producer unit generated its own evaluation catalog, and `evaluation-candidate` stamps `qualifiedAt` with the current time. The two embedded catalogs differed only in that timestamp and the evidence digest over it.
+3. **Case-id namespace.** The last mismatch is in the private evaluator: judges named matched cases by their private id instead of the matrix's opaque id. The evaluator fixes it at its own boundary.
+
+### What this means for you
+
+- **Findings count from every finished report.** Before this, the scorer counted a cell's findings and runtime outcomes only when the helper report was `complete`, meaning no gap and every domain assessed. Real audits nearly always record some gap, such as no web advisory lookup or credential liveness left untested, so all 64 paid cells scored `partial` and the baseline found 0 of 32 seeded issues. `EvalResult` now carries a required `reportFinished` (helper status `finished`). Precision, recall, found seeded issues, runtime outcomes and tested repairs count from finished reports. A running or missing report still counts nothing, and neither does a report behind a failed producer receipt (a timeout, a failed post-run check, or output withheld for a credential), whatever the judge read there; that report also counts as not complete for the two gates below. Completeness is still measured on its own: each group reports `reports` (complete) and `finishedReports`, and the existing `mandatoryReports` and `matchedCompleteMatrix` gates still require complete reports. No threshold changed.
+- **Inventories are checked for unique paths, not order.** The order stays bound by the inventory's identity hash. New producers sort by code unit, so the identity no longer depends on locale.
+- **`evaluation-candidate --created-at <ISO time>`** pins every runtime's `qualifiedAt`. Builds given the same value write identical catalog bytes, so per-platform units embed the same catalog.
+- **`collectProducerReceipts(…, embeddedCatalogs)`** handles units that already embedded different catalogs. When the platforms' catalog hashes differ, it accepts them only if the supplied catalog bodies hash to each platform's `runtimeSha256`, validate, share revision and scanner identity, and are identical apart from `qualifiedAt` and the evidence digest. The batch then carries those bodies, and scoring re-checks them. Without bodies, or with any other difference, the result is still `UNMATCHED_PRODUCER_INSTALLATIONS`.
+
+### Itemized changes
+
+#### Changed
+- `scripts/cso-eval.ts`: `EvalResult.reportFinished` (required, implied by `reportComplete`, implies `reportPresent`) gates counted findings and outcomes. Groups add `finishedReports`. Collected scoring and `createEvalBaseline` count a failed receipt's result as neither finished nor complete.
+- `scripts/cso-eval-producer.ts`: artifact inventory sorted by code unit.
+- `scripts/cso-eval.ts`: `validateArtifactInventory` requires unique paths. `assertPlatformIdentities` accepts the catalog-equivalence proof. `ProducerBatch.embeddedCatalogs` is optional.
+- `scripts/cso-runtime-promotion.ts`: `evaluation-candidate` takes an optional `--created-at`. Documented in `docs/cso-release-qualification.md`.
+
+#### For contributors
+- `test/cso-eval.test.ts`: finished partial reports count findings while the completeness gates still fail. Running and missing reports count nothing. A baseline finds a seeded issue in a finished partial report and never in a running or missing one.
+- `test/cso-eval.test.ts`: in the real-receipt baseline, a seeded issue is found exactly where the vulnerable cell's receipt succeeded.
+- `test/cso-eval.test.ts`: real producer receipts, one per kind (succeeded, span-redacted, credential-withheld, timeout, post-run check failure), with mixed-case helper artifacts, go through collect, `createEvalBaseline` and `scoreCollectedEval`. Locale-ordered inventories are accepted and duplicate paths rejected. Catalog equivalence passes with the bodies and fails without them, with a body missing, duplicated, or with a moved image.
+- `test/cso-runtime-promotion.test.ts`: two `evaluation-candidate --created-at` builds write identical bytes.
+
+## [1.91.83.0] - 2026-10-11
+
+**gstack ships itself under `stamp-at-merge`.** `.gstack/ship-policy.json` flips `queue_mode` to `stamp-at-merge`, `bump` to `patch` and names `garrytan` under `maintainers`. The version is now allocated once, when the PR is next in the queue (`gstack-restamp --next --expect-base --expect-order`), instead of claimed at open and re-slotted on every reorder; every bump is PATCH, so unattended ships never meet the MINOR/MAJOR prompt; and `/review` contributor mode reads the maintainer set from the file instead of calling the collaborators API. `docs/ship-policy.md` gains the queue-side procedure: what a PR carries before its stamp, who runs the restamp and when, and what the merging thread verifies on the exact SHA instead of "VERSION above main".
+## [1.91.82.0] - 2026-10-11
+
+**Plan-review reality rows name their inputs.** The `{{PLAN_REALITY_ROWS}}` prose in plan-eng-review, plan-ceo-review and the autoplan CEO/Eng phases wrote `gstack-plan-reality check --phase <p> <review>` without saying what `<review>` is, and the completion summary cited a `PLAN_REALITY` line no step produced. The check now reads `<review-file|->` (the review you wrote, or stdin) and says it prints the `PLAN_REALITY:` line the summary cites. Found by the plan-eng-review workflow judge on an unrelated PR (clarity 3 / actionability 3 median, both citing these two references).
+
+## [1.91.80.0] - 2026-10-11
+
+**`/eval-plan` prices its default arms out of the box.** `lib/pricing.ts` gains verified rows for `claude-opus-5-5` ($4 / $20 per MTok, cache reads $0.20; Anthropic list prices effective 2026-10-07) and `gpt-6.1-sol` ($2 / $10 per MTok, cached input $0.10; OpenAI model page, standard tier), the two models `gstack-models resolve --role eval-arms` returns under the default `smart` implementation tier. `gstack-eval-plan arms` previously exited `EVAL_PRICE_MISSING` for both; the fail-closed rule is unchanged, only the data was missing.
+
+## [1.91.79.0] - 2026-10-11
+
+**`/eval-plan` preregisters paid evals for your product, coordination tools keep parallel lanes from colliding, and the autoplan owner sees a one-page brief instead of the full review (multi-agent wave PR E, plan items E1 tier 1, E2, E3).**
+
+- **`/eval-plan` (tier 1).** `gstack-eval-plan checklist` renders the preregistration checklist (bars, arms, decoys, stop rules, held-out exposure); `dry-run` runs the `$0` stub model over real input shapes and checks the price-table row, the output budget for reasoning models and the retry prompt's actual text; `pilot` runs n≈3 through `lib/spend-ledger.ts` and prints the extrapolation with an error band before the approval ask; `arms` resolves `gstack-models resolve --role eval-arms`. `PRICING` moves to `lib/pricing.ts` with its excluded billing categories documented; a model without a verified row fails closed with `EVAL_PRICE_MISSING`. Tier-3 steps are named in the skill as `tier 3, after P7`.
+- **Coordination.** `gstack-lane-check` diffs in-flight branches and PRs against planned files and reports each intersection with the PR number and hunk count (`LANE_CONFLICT`). `gstack-evidence verify <bundle>` reruns probes and marks each claim `verified` or `unverified`. `{{COORDINATOR_CONTRACT}}` (merge conditions, behavior-change notices, spend caps, handoff format) renders into autoplan and the spec `--execute` spawn, and `gstack-autoplan contract` prints the identical bytes. `scripts/ubicloud/ubi-runner.sh` tags VMs by owner, adds `list --mine`, `usage`, `records` and own-VMs-only `gc`, and records a VM before creating it. `test_backend` (`local` | `ubicloud`) joins the config and the doctor `cores` row recommends `ubicloud` under 8 cores. Ship gains the Step 18-H no-PR handoff section; cross-thread messages carry full thread ids.
+- **What the owner sees.** autoplan Phase 4 writes `review-record.md` and presents `gstack-owner-brief render`: the `URGENT, outside this plan` block first, a plain summary, then the numbered decisions seven per page with stable ids, `auto` items showing the default taken and `approval` items pending; `close --plan` rewrites every `draft direction stands until the owner decides` line to the decided option and date. `/review --contributor` (auto-detected via `gstack-contributor-mode detect`: `maintainers` in `.gstack/ship-policy.json`, else push permission, else off, source recorded) reviews outside PRs as evidence first with an accept/supersede/decline table and emits credit lines only when a diagnosis or test carried over. `gstack-banned-terms check` runs on every `/review` and `/document-release` diff from `.gstack/banned-terms.json`, naming the term, file and allowed locations.
+
+## [1.91.78.0] - 2026-10-11
+
+**Plan reviews check reality before they check taste, `/review` and `/cso` look sideways from every finding, and `/investigate` ships recipes for flakes, polluters, races, eval bisects and backlog triage.**
+
+Multi-agent wave PR D (`docs/designs/MULTI_AGENT_WAVE_2026_10_10.md`, items D1–D3). The reviews of this wave's own plan found that the most expensive mistakes were premise errors (a file:line that did not say what the plan claimed, a thing already built, a number nobody re-derived), so those checks are now rows every plan review must fill.
+
+### What this means for you
+
+- **Reality rows in plan reviews.** `plan-ceo-review`, `plan-eng-review` and `/autoplan` render one `REALITY: <row> pass|finding|n/a <summary> <file:line>` line per row: premise table (every factual claim with a receipt; `unverified=<n>` is scored), already-done, surface check, binding decisions, numbers re-derived from raw data, deferred asks, PR count. Eleven tier-2 rows (db, perf, search, incident, dependency) load only under `--scope`. `bin/gstack-plan-reality rows|check` prints the applicable rows and the verdict line `PLAN_REALITY: phase=… rows=n/m missing=… verdict=complete|incomplete|repair`; an unattended run with a missing row is `incomplete`, never a warning (`REALITY_ROW_MISSING`, `REALITY_RECEIPT_MISSING`). Each tier-1 row ships with a positive fixture taken from this wave's own review record and a decoy.
+- **Sideways review.** `/review` Step 4 greps every finding's pattern at every other ingress, command and call site, takes the worst sibling's severity, and forces CRITICAL for data loss, trust-boundary bypass and uncapped spend (vocabulary unchanged: CRITICAL/INFORMATIONAL, no lane downgrades). The checklist names the shapes to sweep: siblings, caches in front of guarded or metered calls, static→dynamic imports, parity claims, pool queries inside a caller's transaction, test-only flake fixes. The Scope Check gains `Diff read: full|partial` and `Undeclared behavior changes:`; CLEAN counts as approved only after a full read. The flake-fix rule (`P(fail | regression)` before and after, else RH-15) is shared with `/investigate`. `/cso` Phase 12 does the sibling sweep only.
+- **Investigate recipes.** `/investigate` gains an `## Arguments` table and five carved sections: flake (reproduce on main in a worktree, failed/N, forced probe, never loosen, paid evals never retried, required `## Flake evidence`), polluter (CI-order bisect, `POLLUTER:` line), race (probes, forced interleaving, `Promise.allSettled` writer template), eval-bisect (distinct revisions, cached cheap scorer, detached runs with the sentinel) and backlog (`--backlog`: `still_open` needs a run repro, `already_fixed <commit>`, `partially_fixed`, `owned_elsewhere`, contributor PRs as evidence only). Phase 1 adds call-sites-before-duplicates and `git update-index --refresh` before timing git in a worktree (also in `/benchmark`).
+
+### Itemized changes
+
+#### Added
+- `lib/plan-reality.ts`, `bin/gstack-plan-reality`, `scripts/resolvers/plan-reality.ts` (`{{PLAN_REALITY_ROWS}}`); `scripts/resolvers/sideways.ts` (`{{SIDEWAYS_SWEEP}}`, `{{FLAKE_FIX_NUMBER}}`); `investigate/sections/{manifest.json,flake,polluter,race,eval-bisect,backlog}.md`; fixtures `test/fixtures/multi-agent-wave/reality-rows.json` (+15 `INCIDENTS.md` rows); two result codes with troubleshooting anchors.
+
+#### Changed
+- `scripts/resolvers/plan-gates.ts` (review mode): `Diff read`, `Undeclared behavior changes`, full-read approval rule; ship's byte-pinned plan-completion untouched.
+- Templates: plan-eng-review Scope Challenge + deep incident table, plan-ceo-review 0A/0B + Completion Summary, autoplan ceo/eng phases + Pre-Gate table, review Step 4 + checklist, cso Phase 12, investigate skeleton, benchmark Phase 1. `CARVE_GUARDS` gains `investigate`; caps refreshed with measured ratios (plan-ceo-review +960 B, plan-eng-review +3,794 B, autoplan +851 B, review +923 B replacing the enum paragraph, cso +51 B; qa and ship untouched).
+
+#### For contributors
+- New tests: `test/plan-reality.test.ts` (18), `test/sideways-review.test.ts` (8), `test/investigate-recipes.test.ts` (9); `test/skill-fixture.test.ts` pins the sideways paragraph as its extraction anchor.
+- Not in this release: `gstack-autoplan submit` does not yet call `gstack-plan-reality check` itself (the runner landed in parallel); a parent loop runs the check before `submit`. Automatic tier-2 scope detection waits for the runner's scope set to grow beyond `ui`/`dx`.
+
+## [1.91.77.0] - 2026-10-11
+
+**`/ship` now runs a two-stage pre-gate before anything paid, regenerates generated files from a committed registry, and links issues only on explicit intent (multi-agent wave C-pregate, plan items C4, C6, C8 tier 1).**
+
+- **`gstack-pregate` (`lib/pregate/*`).** Stage 1 is the mechanical preflight (`regen`, `secrets`, `strays`, `literals`), stage 2 runs the test lanes the touched files select, with a separate clock each; results record the tree identity they ran against and go stale when the tree moves, so `gstack-ship-receipt write --pregate` refuses on `PREGATE_STALE`, `LANE_FAILED`, `INCOMPLETE` or `REMOTE_UNCLEARED` and writes nothing. Lanes come from the repo's own workflow files; a lane this machine cannot run becomes a persisted `requires-remote` obligation cleared with `gstack-pregate clear --run-url`. `secrets` and required lanes cannot be downgraded in `.gstack/pregate.json`; repo-declared commands run only from `/ship` or with `--allow-repo-commands`, otherwise the check is `incomplete`, never `pass`.
+- **`gstack-regen` + `.gstack/generated.json`.** `check` runs each registered generator in a scratch worktree and diffs the outputs; `write` records sha256 pre/post; gstack registers `skill-docs` and `ship-goldens` (`scripts/gen-ship-goldens.ts`).
+- **`gstack-issue-links`.** `Fixes #N` only from a `Fixes`/`Closes`/`Resolves` trailer or `--issue`; bare mentions, partial work and cross-repo references render as `Refs`; an unreadable closure issue downgrades to `Refs` with `ISSUE_UNREADABLE`; `--ci-run <id>` adds `Flake: #N (run <id>)`. Step 18 renders the `## Issues` section from it.
+- **Step 5 lane example** collects every background lane's PID under `set -o pipefail` and fails on any non-zero exit, so a `| tail`-hidden failure can no longer pass.
+- Tier 2 checks (`guards`, `ratchets`, `lint`, `links`, `hermetic`, `patches`, `integrator`) are named in `docs/pregate.md` as a follow-up; 14 new result codes with troubleshooting anchors.
+
+## [1.91.75.0] - 2026-10-11
+
+**CSO paid producers no longer fail a successful audit because the final summary quoted the helper's own run ID. Credential-class text still withholds the output and fails the receipt, and the reason now names the matching redactor rules and counts.**
+
+In the first paid baseline both smoke cells finished their audits, then the producer marked each receipt `failed` with `Sensitive producer output or error withheld`. The producer treated any redactor match as a leak. A CSO run ID such as `<13-digit epoch>-<hex16>` matches `pii.phone.e164`, and some also match `pii.cc`. The fixtures' metadata address and a `PRIVILEGED` label also match. Replaying a mock provider through the installed producer, a summary of just "complete — assessed source in run <runId>." failed on 1.91.73.0 and succeeds now.
+
+### What this means for you
+
+- **Rule-named failures.** A credential-class match (the redactor's `secret` category) in the output, the error, or either concatenation still replaces the output with `[sensitive producer output redacted]` and fails the receipt. The reason is now `Sensitive producer output or error withheld: credential-class rule <id>×<count>, …` and never includes the matched text.
+- **Source canaries quoted bare.** Values assigned to credential-shaped names in the cell's verified source (the `env.kv` rule), such as a planted canary, are matched exactly, including across output and error. They fail as `source.env.kv`, because no pattern recognises such a value once it is quoted without its name.
+- **Helper identifiers survive.** Run and replay IDs, `cso-eval-<run>-<sha12>` catalog revisions, `<tool>-<hex16>-<hex16>` artifact IDs and hex finding, review and content IDs are set aside before the PII, internal and legal rules run. Those rules now replace their spans in place (`<REDACTED-<rule>>`) and no longer change the receipt status. Scoring reads the helper's report, and the evaluator still scans outputs for its canaries.
+
+### Itemized changes
+
+#### Changed
+- `scripts/cso-eval-output-redaction.ts` (new): `redactProducerText` and `sourceCredentialValues`. `sanitizeProducerRun` in `scripts/cso-eval-producer.ts` uses them; the source values are collected once after the source is sealed and validated.
+
+#### For contributors
+- `test/cso-eval.test.ts`: helper IDs kept with PII spans redacted in place; env-line and Anthropic-key outputs fail with their rule names; a source canary is withheld whole or split across output and error. The existing canary test now expects the rule-named reason.
+
+## [1.91.73.0] - 2026-10-11
+
+**"Ship, next in queue at <version>" with zero manual stamp edits: a committed repo ship policy, `gstack-restamp` that stamps a PR only when it is next to merge (and re-stamps after a reorder in one step), a tree receipt that proves the only change since the gate was the stamp, a portable evidence bundle, and a ship receipt in the PR body.**
+
+Reordering a release queue used to mean hand-editing VERSION, CHANGELOG headings, `(was X)` mentions and the lockfile on every PR behind the moved one, then re-running a full gate on a tree that differed only by those bytes. This release (multi-agent wave PR C-stamp) makes the stamp one command and the gate decision a receipt.
+
+### What this means for you
+
+- **`.gstack/ship-policy.json`** declares the repo's bump policy, `queue_mode` (`claim-at-open` or `stamp-at-merge`), `release_tool` and its allowed outputs, `stamp_paths`, CHANGELOG rules, mirror, history policy (`merge-only`), preregistration SHAs, stamp-sensitive gates, PR count and maintainers. `bin/gstack-ship-policy init|validate|show-effective|check-history` reads it from `origin/<base>` (never the working tree silently; `POLICY_SOURCE_UNAVAILABLE` on a shallow checkout); a policy that only exists on the branch is labeled `head (unreviewed)`. Commands the policy names run only under `--allow-repo-commands` or inside `/ship`; a refusal happens before any write and says `nothing written`. `docs/ship-policy.md`; `.gstack/ship-policy.example.json`.
+- **`bin/gstack-restamp --version X | --next | --after <pr>`**: under `stamp-at-merge`, `--next` is the base's configured version source plus the policy bump (claims ignored); `--expect-base <sha>` and `--expect-order <pr,...>` re-validate right before merge and return `QUEUE_STALE` with the exact recomputation command when either moved; `--after <pr>` builds the gate-ahead merge in a throwaway worktree, stamps relative to the predecessor and records its head and the evidence branch key in `.gstack/tmp/gate-ahead.json`, leaving the PR branch's history untouched. The release tool runs in a staging worktree against an enumerated allowed-output set with preimages and postimages; every stage is journaled (`.gstack/tmp/restamp-journal.json`) so a failure resumes or rolls back, and a rollback refuses to overwrite a later user edit (`RESTAMP_CONFLICT`). Idempotent; `--dry-run` prints the full diff and writes nothing. Stamp rewriting is provenance-based: `(was X)`, `since: X` and `vX` are rewritten only where they are the branch's own tentative stamp, so a dependency pin that equals the old version is never touched.
+- **`bin/gstack-tree-receipt`** compares committed heads hunk by hunk with per-file-type rules (version file, manifest version, lockfile root `version` keys only, CHANGELOG heading move, exact stamp patterns) and prints `TREE: same-modulo-stamps` or `TREE: changed (<paths>)` plus `gate-reuse: eligible` or `not-eligible (<what changed>) — fix: …`. Equivalence is per gate: lanes the policy marks stamp-sensitive always rerun. `PREDECESSOR MOVED <old> -> <new>` refuses reuse when the gate-ahead predecessor moved.
+- **`gstack-evidence bundle`** exports comparison material, the required-lane manifest, executed selections, run URLs, outcomes, hashes and execution identity (runtime, normalized lockfile hashes, CI workflow tree, runtime pins, runner image), distinguishing verified from imported lanes; a coordinator on a fresh machine reads it after the gate VM is gone and reuse is refused when identity is unknown. `gstack-evidence ancestor` checks preregistration SHAs are ancestors (`PREREGISTRATION_NOT_ANCESTOR`).
+- **`bin/gstack-ship-receipt write|read --pr|census`** writes the fenced, schema-versioned ship receipt as the first block of the PR body (session kind, tree verdict, gate reuse, policy, queue mode, preregistration, history, artifacts consumed) and `census --repo --since <tag>` computes the adoption number over merged PRs, deduplicated by run and thread against a cohort file.
+- **`/ship`**: Step 3 prints the policy and history lines, Step 12 under stamp-at-merge calls `gstack-restamp` and never asks for a version when the policy says `bump patch`, Step 16 consults the tree receipt per lane and leaves `--force-gate <reason>` to the coordinator, and the PR body opens with the receipt. gstack's own policy is committed (`bump ask`, `claim-at-open`, `release_tool: bun scripts/gen-agents-digest.ts`).
+
+### Itemized changes
+
+#### Added
+- `lib/ship-policy.ts`, `lib/restamp.ts`, `lib/changelog-check.ts`, `lib/tree-receipt.ts`, `lib/evidence-bundle.ts`, `lib/ship-receipt.ts`; `bin/gstack-ship-policy`, `bin/gstack-restamp`, `bin/gstack-tree-receipt`, `bin/gstack-ship-receipt`; `gstack-evidence bundle|ancestor`; `.gstack/ship-policy.json`, `.gstack/ship-policy.example.json`, `docs/ship-policy.md`; 22 result codes with troubleshooting anchors (`POLICY_*`, `QUEUE_STALE`, `RESTAMP_*`, `CHANGELOG_*`, `GATE_REUSE_NOT_ELIGIBLE`, `EVIDENCE_*`, `PREREGISTRATION_NOT_ANCESTOR`, `HISTORY_POLICY_VIOLATION`, `RECEIPT_*`).
+
+#### Changed
+- `lib/headless-artifacts.ts` ship-receipt schema extended (thread, tree enum, gate_reuse, policy, queue_mode, preregistration, history); `gstack-artifact validate --as ship-receipt`.
+- `ship/SKILL.md.tmpl` Steps 3, 12, 16 and `ship/sections/pr-body.md.tmpl`; union bytes +462 (1,937 headroom) paid for by condensing unpinned sentences and moving queue and receipt instructions into `gstack-ship-policy show-effective`'s `ship:` lines and `gstack-restamp`'s `next:` line. Four ship goldens regenerated.
+
+#### For contributors
+- New tests: `test/gstack-ship-policy.test.ts`, `test/gstack-restamp-queue.test.ts` (three PRs reordered twice with zero manual edits, injected failure after every stage, concurrent-edit conflict, squash-history gate-ahead, `QUEUE_STALE`, release tool writing outside its allowed set, metadata-only lockfile change, version-source shapes), `test/restamp-command-boundary.test.ts`, `test/tree-receipt-stamp-sensitive.test.ts` (including the dependency-pin negative fixture), `test/evidence-bundle-portability.test.ts` (fresh clone, empty state root), `test/gstack-ship-receipt.test.ts`; fixture helper `test/helpers/restamp-fixture.ts`.
+- Not in this release: the policy's `mirror` is parsed and validated but its stage prints `skipped (no mirror in policy)` (tier 2); C4 regen registry, C6 issue links and the C8 pre-gate follow in C-pregate.
+
+## [1.91.72.0] - 2026-10-11
+
+**`/autoplan` runs unattended end to end: `gstack-autoplan next|submit` drives the review phases as a durable state machine for a parent agent, the outside voice is a pluggable runner (Codex CLI, API, or a cross-family host subagent), review phases load a short checklist instead of the whole methodology, and the spec-review loop stops honestly at its cap.**
+
+B-core (1.91.70.0) gave gstack the artifact contract and the `unattended` session kind; this release (multi-agent wave PR B-runner) is the loop that produces those artifacts on a machine with no Claude Code harness.
+
+### What this means for you
+
+- **`bin/gstack-autoplan next --out <dir>`** prepares the current phase (snapshot, methodology, prompt), persists the dispatch intent with an attempt id, prints the voice, prompt path, expected result path and required model family, and exits `GSTACK_RESULT: status=awaiting_result`. The parent dispatches the reviewer (a subagent, Codex, or an API call) and returns the result with **`submit --phase --voice native|outside --result <file> --model <id> --attempt <id>`**, which validates the full-read receipt, canonical findings and model family, binds the hash into `run.json` atomically, reconciles both voices and closes the phase. `status`, `export`, `answer --gate-rev --reply`, `resume` and `run` complete the verb set. A stale, unparsed or conflicting reply writes nothing; a non-recommended answer that changes reviewed content reopens only the affected phases with Eng last; `resume` takes exclusive ownership and marks an attempt with dispatch intent but no terminal record `EXECUTION_UNKNOWN` instead of redispatching it. `docs/unattended.md` has the parent loop.
+- **`bin/gstack-outside-voice run --runner codex-cli|api|host-subagent`** over one adapter interface (capabilities, input digest, actual model metadata, cancellation, terminal result, usage). A result file from a subagent on another model family is a full outside voice and records its model; a missing Codex CLI is not "degraded" when another runner reviewed. `bin/gstack-codex-login` logs Codex in from `OPENAI_API_KEY`.
+- **`--spend-cap`** is enforced by a shared ledger (`lib/spend-ledger.ts`: `spent + reserved + next_estimate <= cap` under a file lock; reservations survive a crash; host-subagent spend is reported `unknown`, not zero).
+- **Checklists.** Each plan review skill ships `sections/checklist.md` (under 35 lines) with an output-to-section map; unattended and `light` runs load it and print `Skipped sections: <ids> (scope: …)`, loading the deep section whenever scope detection is uncertain. Manifests gain an optional `scope` (default `always`) and `runner_only`; interactive renders are unchanged.
+- **Spec-review loop at the cap** (`gstack-office-hours-review finalize`): numbered unresolved gaps, then either a deterministic `issues verified: k of N` record or `N fixes unconfirmed` with `Decision: spec not re-verified`; never a fourth model launch, never promoted to a verdict.
+- **Reconciliation.** When an outside pass runs beside the native one, the consensus table and per-finding reconciliation are computed from canonical finding ids (confirmed, disagree, new), and the Eng prompt refuses to start without the prior phase's consensus (`CONSENSUS_MISSING`).
+
+### Itemized changes
+
+#### Added
+- `lib/autoplan-state.ts`, `lib/autoplan-run.ts`, `lib/autoplan-gate.ts`, `lib/autoplan-export.ts`, `lib/autoplan-prompts.ts`, `lib/autoplan-reconcile.ts`, `lib/spend-ledger.ts`, `lib/spec-review-cap.ts`, `lib/outside-voice-runner.ts`, `lib/outside-voice-api.ts`; `bin/gstack-autoplan`, `bin/gstack-outside-voice`, `bin/gstack-codex-login`; `autoplan/sections/unattended.md`; `sections/checklist.md` in the four plan review skills; eleven new result codes with troubleshooting anchors.
+
+#### Changed
+- `lib/headless-artifacts.ts`: `ackRun` runs under a file lock (exactly-once ack); `native_counterpart` accepts `null`.
+- `scripts/resolvers/sections.ts` types `scope` and `runner_only`; `scripts/resolvers/spec-review.ts` prose names the cap record in all three loop branches.
+- Union bytes: plan-ceo/eng/design/devex-review grow under their caps; autoplan +612 (65 bytes of headroom left); ship, review and qa unchanged.
+
+#### For contributors
+- New tests: `test/autoplan-run-recovery.test.ts` (kill before and after persistence, no duplicate charge), `test/autoplan-run-concurrency.test.ts` (one of six concurrent submits binds; exactly-once ack), `test/autoplan-answer-invalidation.test.ts`, `test/review-checklists.test.ts` (obligation map with negative controls), `test/outside-runner-contract.test.ts`, `test/spend-ledger.test.ts`; `test/office-hours-review.test.ts` and `test/office-hours-completion.test.ts` cover the cap record.
+- Not in this release: the rendered Codex prose still shells to `codex` directly (`scripts/resolvers/outside-voice-steps.ts`); routing it through `bin/gstack-outside-voice` touches 21 Codex-pinned tests and the ship/review byte budgets, so it follows separately. `gstack-autoplan run` (the in-process loop) is typechecked but exercised only through `next`/`submit`.
+
+## [1.91.71.0] - 2026-10-10
+
+**A parent agent can now confirm a gstack install with one grep: `gstack-doctor --check` prints one PASS/FAIL/SKIP row per component and exactly one `gstack: ok … for=<skill>` or `gstack: fail <ids>` trailer with a real exit code, and `gstack-capy-install` sets up a Capy machine without downloading Chromium.**
+
+The user-scope Capy installer's `--check` certified machines with nothing installed, planning machines paid 86 s for a browser they never opened, and `./setup` exited before its own repair step on an image whose Bun was below gstack's floor. This release is PR A of the multi-agent wave (`docs/designs/MULTI_AGENT_WAVE_2026_10_10.md`).
+
+### What this means for you
+
+- **`gstack-doctor --check [--for <skill> | --require <csv>] [--project <path>] [--revision <ref>] [--json] [--live]`.** Rows are `PASS|FAIL|SKIP <id> <detail>` (`claude codex patch codex-cli browse-bundle browser cso runtime pins state-root privacy cores revision`); every FAIL carries `fix: <exact command>` and a reason code with a `docs/troubleshooting.md` anchor. `--for autoplan` requires only what autoplan needs: a healthy Capy machine with Claude subagents as the outside voice and no Codex CLI passes. The paid Codex probe runs only with `--live`. Exit 0 only when every required component passes; 1 on a FAIL; 2 on usage. The doctor still reports with Bun absent or below floor (the component table is generated into sourced bash).
+- **The `runtime` row distinguishes gstack's security floor (1.3.3) from its supported minimum (1.4.2)**; the default Capy image's Bun 1.3.14 is a FAIL under `--check`. The new `pins` row reads the *target project's* `packageManager`, `engines`, `.tool-versions`, `.nvmrc`, `.bun-version` and CI matrix pins (per lane, so a Windows pin never blocks a Linux run) and names each constraint's source.
+- **`bin/gstack-capy-install`** (Capy cloud Ubuntu): Bun/Node/jq preflight before `./setup` (Bun upgraded from the exact release archive with SHA-256 verification when gstack's minimum and the project pin agree; `RUNTIME_PIN_CONFLICT` stops with both printed and installs nothing), reuses an existing checkout without reset or pull, runs both host setups without the browser, prints planning-only install time separately, and ends with the doctor trailer plus `GSTACK_LAUNCH: GSTACK_SESSION_KIND=unattended GSTACK_STATE_ROOT=<path> GSTACK_EPHEMERAL=1` for the parent to pass to every gstack command. `--revision <ref>` on a checkout at another revision reports `(requested <ref>; run gstack-upgrade to move)`, never pulls. See `docs/capy-install.md`.
+- **Chromium is lazy.** `./setup --no-browser` is a documented flag; `bin/gstack-browser-ensure` installs the browser on the first browser-skill run under setup's lock, and every browser skill's fallback detection calls it. `--check` reports `SKIP browser (lazy; gstack-browser-ensure installs on first use)` for planning skills.
+- **`./setup --status` exits 1** when an install has broken section links instead of always 0.
+- The doctor's `state root` row prints `durable=yes|no` from the `GSTACK_EPHEMERAL=1` marker (`docs/state-root.md#ephemeral-machines`).
+
+### Itemized changes
+
+#### Added
+- `bin/gstack-doctor-check.sh` (sourced by `bin/gstack-doctor`), `lib/doctor-components.ts` → generated `bin/gstack-doctor-components.sh` (`scripts/gen-doctor-components.ts`, freshness-tested), `lib/runtime-pins.ts` + `bin/gstack-runtime-pins.ts`, `lib/result-codes.ts` (`COMPONENT_MISSING`, `RUNTIME_BELOW_MINIMUM`, `PROJECT_PIN_MISMATCH`, `REVISION_UNMET`, `RUNTIME_PIN_CONFLICT`, `BROWSER_UNAVAILABLE`, `INSTALL_PREFLIGHT_FAILED`), `bin/gstack-capy-install`, `bin/gstack-browser-ensure`, `docs/capy-install.md`.
+
+#### Changed
+- `setup`: `--no-browser`, `--status` exit code, Bun install hint uses the release-archive recipe (`bash "$tmpfile" "bun-v$BUN_VERSION"`; the install script pins by positional argument). Bun release checksums live in `bin/gstack-bun-version.sh`.
+- `scripts/resolvers/browse.ts`: `$B` detection runs `gstack-browser-ensure` before `READY`, byte-neutral on the zero-headroom skills.
+
+#### For contributors
+- New tests: `test/gstack-doctor.test.ts` `--check` fixtures (healthy, each missing component, wrong host, missing auth, runtime mismatch at both floors, bun removed from PATH, pins, unmet revision, browser only for browser skills, `--json`, usage), `test/gstack-capy-install.test.ts`, `test/gstack-browser-ensure.test.ts`, `test/runtime-pins.test.ts`, `test/doctor-components.test.ts`.
+- Any later change to browse.ts prose needs a reversal entry in `test/helpers/manual-judge-review-fixture.ts`; new gen-skill-docs sibling modules need an entry in `test/gen-skill-docs-prune-stale.test.ts`; new network operations in `bin/` need an `egress-receipt-wiring` entry.
+
 ## [1.91.70.0] - 2026-10-10
 
 **gstack runs unattended for a parent agent: one artifact contract a parent can validate, an `unattended` session kind that never prompts or syncs, a review log whose status is derived from its findings, and a gate list that is written, never auto-approved.**
@@ -2306,7 +2648,6 @@ What this means for anyone shipping here: PRs get one honest paid verdict faster
 #### For contributors
 - `bun run eval:flake-rank` (with `--json`, `--dir`, `--since-days`) is the promotion-clock dial; the WS16 required-check decision reads it.
 - The overhaul plan (16 workstreams, reviewed by CEO + eng passes with two cross-model outside voices) continues: budget-aware shard walls, PTY readiness events, free-suite splits, judge determinism, and required-check promotion are the next waves.
-
 
 ## [1.76.0.0] - 2026-08-31
 
@@ -6156,7 +6497,6 @@ If you run `/retro` on a Conductor branch that's been around for a few days, the
 - Defer-doc artifact `~/.gstack-dev/plans/1539-framework-aware-review.md` describes the multi-week framework-aware ORM verification extension (Django/Rails/SQLAlchemy detection, model-introspection helpers, migration-history-aware checks) intentionally deferred from this wave. Promote to active plan when v1.43.0.0 ships and a second high-volume FP report lands on a different framework, or a follow-up retro shows the lighter quoted-line gate doesn't deliver measurable FP reduction.
 - Wave shape preserved from Daegu pattern: ONE bundled PR with bisect commits, atomic squashed commits for `.tmpl` edit + `gen:skill-docs` regen pairs, intermediate verification checkpoints, original contributors credited in commit author + footer. See `[[feedback_one_pr_fix_waves]]` in agent memory.
 
-
 ## [1.43.1.0] - 2026-05-21
 
 ## **Local gbrain PGLite now defaults to Voyage's code-specialized embedding model when `VOYAGE_API_KEY` is set.**
@@ -6204,7 +6544,6 @@ If you have `VOYAGE_API_KEY` set and run `/setup-gbrain` on a fresh machine, `gb
 
 **Regenerated**
 - `setup-gbrain/SKILL.md`, `sync-gbrain/SKILL.md` — refreshed via `bun run gen:skill-docs --host all` after the template edits
-
 
 ## [1.43.0.0] - 2026-05-20
 

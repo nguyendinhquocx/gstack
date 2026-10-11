@@ -5,12 +5,12 @@ Before dispatch, Read `methodologyPath` from `bun "<SNAPSHOT_TOOL>" methodology 
 **Override rules:**
 - Mode selection: DX POLISH
 - Persona: infer from README/docs, pick the most common developer type (P6)
-- Competitive benchmark: research through Aside per the loaded skill's "Web research runs in Aside" section (WebSearch when Aside is not ready); use the reference benchmarks when neither is available (P1)
+- Competitive benchmark: research through Aside per the loaded skill's "Web research runs in Aside" section (WebSearch when Aside is not ready); reference benchmarks when neither is available (P1)
 - Magical moment: pick the lowest-effort delivery vehicle that achieves the competitive tier (P5)
-- Getting started friction: always optimize toward fewer steps (P5, simpler over clever)
+- Getting started friction: always optimize toward fewer steps (P5)
 - Error message quality: always require problem + cause + fix (P1, completeness)
 - API/CLI naming: consistency wins over cleverness (P5)
-- DX taste decisions (e.g., opinionated defaults vs flexibility): mark TASTE DECISION
+- DX taste decisions (opinionated defaults vs flexibility): mark TASTE DECISION
 - Dual voices: always run BOTH Claude subagent AND Codex if available (P6).
 
   **Bind phase input:** Run; use `snapshotPath` as `<DX_INPUT>` for both voices:
@@ -81,7 +81,7 @@ _CODEX_SEL=$(echo "$_CODEX_OUT" | sed -n 's/^CODEX_SEL: //p')
 _CODEX_SANDBOX_MODE=$(echo "$_CODEX_OUT" | sed -n 's/^CODEX_SANDBOX: //p')
 "$_CODEX_PROBE" show-first-use-notice
 _OUTSIDE_EXIT=0
-"$_CODEX_PROBE" run-with-timeout 540 codex exec - -C "$_REPO_ROOT" -s "${_CODEX_SANDBOX_MODE:?}" -c "model=\"${_CODEX_SEL:?}\"" -c skills.include_instructions=false -c 'model_reasoning_effort="high"' -c 'web_search="cached"' --json -o "$_OUTSIDE_TMP/text" <"$_OUTSIDE_INPUT" >"$_OUTSIDE_TMP/events" 2>"$_OUTSIDE_TMP/stderr" || _OUTSIDE_EXIT=$?
+"$_CODEX_PROBE" run-with-timeout --effort high 540 codex exec - -C "$_REPO_ROOT" -s "${_CODEX_SANDBOX_MODE:?}" -c "model=\"${_CODEX_SEL:?}\"" -c skills.include_instructions=false -c 'web_search="cached"' --json -o "$_OUTSIDE_TMP/text" <"$_OUTSIDE_INPUT" >"$_OUTSIDE_TMP/events" 2>"$_OUTSIDE_TMP/stderr" || _OUTSIDE_EXIT=$?
 cat "$_OUTSIDE_TMP/text" 2>/dev/null || tail -n 20 "$_OUTSIDE_TMP/events"
 if [ "$_OUTSIDE_EXIT" -eq 124 ]; then
   "$_CODEX_PROBE" log-event codex_timeout "540" || true
@@ -100,7 +100,7 @@ echo 'OUTSIDE_STATUS: completed provider=codex host=claude'
 
 Use Bash `timeout: 600000`; show the full response in a `tool-output` fence. Require successful execution and valid markers. Refusal, empty/malformed output, missing score/severity/completion markers, timeout or CLI failure means `outside_status: unavailable`. P0/P1 findings block like native ones; `OUTSIDE_STATUS: unverified` is missing coverage. Use the caller's fallback; missing coverage is never clean/PASS. After either outcome, delete only your private prompt; scratch cleanup is automatic.
 
-Failed/incomplete outside review → unavailable; disabled → skip outside. Both retain the native pass.
+Failed/incomplete outside review → unavailable; disabled → skip outside. Both keep the native pass.
 
 Retain the historical review-log skill ID; add `"host":"claude","outside_provider":"codex","outside_status":"completed|unavailable|disabled|skipped","phase":"dx"`. Record differing attempt outcomes separately. `source:"codex"` requires completed CLI output; native uses `source:"in-host"` (historical `source:"claude"`: native Claude). Availability/native fallback is not outside completion. Preserve all reported modelUsage; unknown model identity stays unknown. Under `GSTACK_CODEX_NO_SANDBOX=1` add `"codex_sandbox":"danger-full-access"`.
 

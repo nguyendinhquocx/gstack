@@ -23,7 +23,11 @@ bin/.gstack-cso-build-result
 bin/.gstack-cso-build.log
 lib/cso/images/gstack-cso-verifier
 lib/cso/images/gstack-cso-preparation
-.gstack/
+.gstack/*
+!.gstack/ship-policy.json
+!.gstack/ship-policy.example.json
+!.gstack/generated.json
+!.gstack/pregate.json
 .claude/skills/
 .claude/gstack-rendered/
 .claude/scheduled_tasks.lock
@@ -68,3 +72,4 @@ docs/throughput-*.json
 # test/ios-qa-swift-build.test.ts; regenerates on every run — never commit)
 ios-qa/scripts/gen-accessors-tool/.build/
 ios-qa/scripts/gen-accessors-tool/Package.resolved
+.gstack/

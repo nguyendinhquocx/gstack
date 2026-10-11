@@ -5,6 +5,7 @@
  * Moved from scripts/resolvers/review.ts.
  */
 import { type TemplateContext } from './types';
+import { undeclaredBehaviorLines } from './sideways';
 
 /** Approval readiness precedes output; the exit gate only verifies the saved result. */
 export function generatePlanReviewApprovalCheck(ctx: TemplateContext): string {
@@ -87,12 +88,12 @@ Failed checks use **Gate outcome: Blocked**. Chat or body prose cannot replace
 the verified terminal report. Do not call ExitPlanMode until all checks pass.`;
   if (ctx.skillName === 'plan-eng-review') return `## EXIT PLAN MODE GATE (BLOCKING)
 
-Run this final verification for every review target, in every host mode. It
-checks the completed work; only the later ExitPlanMode call is plan-mode-only.
+Run this for every review target in every host mode; only the later
+ExitPlanMode call is plan-mode-only.
 
-Confirm Approval readiness passed for the current decisions. This is a
-read-only verification, not a new approval or output-writing step. If it is
-stale, report the stale verification and stop before success telemetry;
+Confirm Approval readiness passed for the current decisions; this read-only
+verification is not an approval or a write. If stale, report the stale
+verification and stop before success telemetry;
 follow **Blocked outcome**. Resume under **Recovery routing → Late change or missing work**.
 
 Verify all five checks against the selected report file:
@@ -106,7 +107,7 @@ Verify all five checks against the selected report file:
 5. Confirm \`gstack-review-log\` was called and \`gstack-review-read\` ran at
    least once for the completed saved review.
 
-Apply **Review record and write policy**: forbidden report/log persistence or
+Forbidden report/log persistence uses **Report-back outcome**, not this gate;
 an unrecovered save cannot pass. If any check fails, follow **Blocked outcome**
 without success telemetry or ExitPlanMode. Body prose cannot replace the
 separate terminal structured report.`;
@@ -553,9 +554,12 @@ Intent: <from plan file — 1-line summary>
 Plan: <plan file path>
 Delivered: <1-line summary of what the diff actually does>
 Plan items: N DONE, M PARTIAL, K NOT DONE
+${undeclaredBehaviorLines().fields}
 [If NOT DONE: list each missing item with investigation]
 [If scope creep: list each out-of-scope change not in the plan]
 \`\`\`
+
+${undeclaredBehaviorLines().rule}
 
 **No plan file found:** Use commit messages and TODOS.md as fallback sources (see above).
 Emit Step 1.5's Scope Check once without plan fields. If no intent sources exist, state

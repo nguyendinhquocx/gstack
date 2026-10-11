@@ -843,6 +843,13 @@ solves the pain directly or only a proxy.
 Map each sub-problem to reusable code. For any rebuild, explain why refactoring
 the existing path is worse.
 
+**Reality rows (required):** run `~/.claude/skills/gstack/bin/gstack-plan-reality rows --phase ceo` and work each
+row it prints (tier 1 always: premise-table, already-done, surface-check, binding-decisions, numbers, deferred-asks, pr-count; tier 2 by detected scope, `--scope <csv>`).
+Every row cites a file:line receipt; the premise table counts `unverified=<n>`. End with
+one line per row, `REALITY: <row> pass|finding|n/a <summary> <file:line>`, then run
+`~/.claude/skills/gstack/bin/gstack-plan-reality check --phase ceo <review-file|->` (it prints the `PLAN_REALITY:` line): a missing row is `incomplete`
+unattended; interactive runs repair twice, then warn at the gate.
+
 ### 0C. Dream State Mapping
 Describe the 12-month ideal and whether this plan moves toward it.
 ```
@@ -1169,7 +1176,7 @@ The subagent should return:
 - **PASS:** Stop the loop.
 - **Issues:** Stop after the third review, or when consecutive reviews repeat the same unresolved issues (the same requirements and problems). Otherwise use 0D for new or reopened choices, amend the working plan and CEO summary under the storage policy, Keep both consistent, and re-dispatch with both updated inputs and the same instructions.
 
-Make at most three reviewer launches. A missing score alone does not require another review.
+Make at most three reviewer launches. A missing score alone does not require another review. At the cap, list the unresolved issues as numbered gaps and never re-review unchanged input: verify each listed fix against the amended plan text and report `issues verified: k of N` (applied edits, not a verdict), or report `N fixes unconfirmed` and add a `spec not re-verified` decision to 0H. DONE_WITH_CONCERNS names the missing points next to the score.
 
 **Step 3: Report and persist metrics**
 

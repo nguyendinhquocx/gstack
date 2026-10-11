@@ -358,8 +358,7 @@ review. The user turns this off only by asking explicitly
 
 ```bash
 
-_OUTSIDE_CFG=$("$HOME/.claude/skills/gstack/bin/gstack-config" get codex_reviews 2>/dev/null || echo enabled)
-if [ "$_OUTSIDE_CFG" = disabled ]; then
+if ! _OUTSIDE_CFG=$("$HOME/.claude/skills/gstack/bin/gstack-config" get --stored codex_reviews) || [ "$_OUTSIDE_CFG" = disabled ]; then
   echo 'CODEX_MODE: disabled'
 elif ( # GSTACK_ACTIVE_HOST names the harness, never the model.
 if { [ -n "${CODEX_THREAD_ID:-}" ] || [ -n "${CODEX_SANDBOX:-}" ] || [ "${GSTACK_ACTIVE_HOST:-}" = codex ]; }; then
@@ -378,7 +377,7 @@ else
 fi
 ```
 
-The historical `CODEX_MODE` variable describes **Codex** availability here. The invocation checks auth and the [policy](https://github.com/garrytan/gstack/blob/main/docs/model-policy.md) plan-review model. Missing/broken CLI: install or repair Codex; authentication failure: run `codex login`. Disabled ends this entire extra review step, including the native fallback; record outside_status: disabled and continue after the section. Disabled is not an unavailable provider and never triggers a replacement reviewer. Provider failure is missing outside coverage; follow the caller’s existing fallback only when reviews are enabled. Never substitute another external provider.
+The historical `CODEX_MODE` variable describes **Codex** availability here. The invocation checks auth and the [policy](https://github.com/garrytan/gstack/blob/main/docs/model-policy.md) plan-review model. Missing/broken CLI: install or repair Codex; authentication failure: run `codex login`. Disabled ends this entire extra review step (so does a send's `consent_missing` line), including the native fallback; record outside_status: disabled and continue after the section. Disabled is not an unavailable provider and never triggers a replacement reviewer. Provider failure is missing outside coverage; follow the caller’s existing fallback only when reviews are enabled. Never substitute another external provider.
 
 **Outcome routing:** Follow the row for the current result. After an invocation, route its result
 again. Leave only after recording disabled/unavailable coverage, or after
@@ -483,7 +482,7 @@ _CODEX_SEL=$(echo "$_CODEX_OUT" | sed -n 's/^CODEX_SEL: //p')
 _CODEX_SANDBOX_MODE=$(echo "$_CODEX_OUT" | sed -n 's/^CODEX_SANDBOX: //p')
 "$_CODEX_PROBE" show-first-use-notice
 _OUTSIDE_EXIT=0
-"$_CODEX_PROBE" run-with-timeout 300 codex exec - -C "$_REPO_ROOT" -s "${_CODEX_SANDBOX_MODE:?}" -c "model=\"${_CODEX_SEL:?}\"" -c skills.include_instructions=false -c 'model_reasoning_effort="high"' -c 'web_search="cached"' --json -o "$_OUTSIDE_TMP/text" <"$_OUTSIDE_INPUT" >"$_OUTSIDE_TMP/events" 2>"$_OUTSIDE_TMP/stderr" || _OUTSIDE_EXIT=$?
+"$_CODEX_PROBE" run-with-timeout --effort high 300 codex exec - -C "$_REPO_ROOT" -s "${_CODEX_SANDBOX_MODE:?}" -c "model=\"${_CODEX_SEL:?}\"" -c skills.include_instructions=false -c 'web_search="cached"' --json -o "$_OUTSIDE_TMP/text" <"$_OUTSIDE_INPUT" >"$_OUTSIDE_TMP/events" 2>"$_OUTSIDE_TMP/stderr" || _OUTSIDE_EXIT=$?
 cat "$_OUTSIDE_TMP/text" 2>/dev/null || tail -n 20 "$_OUTSIDE_TMP/events"
 
 cat "$_OUTSIDE_TMP/stderr" >&2 || { [ "$_OUTSIDE_EXIT" -ne 0 ] || _OUTSIDE_EXIT=1; }
@@ -695,6 +694,11 @@ Use these facts in the Summary, report row and Review Log. Artifact cells stay
 pending until confirmed writes, or not persisted when forbidden. A substantive
 late decision repeats readiness and recomputes facts before refreshing outputs.
 
+### Reality rows
+
+The `REALITY:` lines from 0A/0B (one per applicable row) and the `PLAN_REALITY`
+check line, kept above the Completion Summary that tallies them.
+
 ### "NOT in scope" section
 List explicitly deferred and rejected work separately, with each actual answer
 and one-line rationale. Deferred work also goes to TODOS.md; rejected work does not.
@@ -862,6 +866,7 @@ Step 0 and the review sections. Compute "Lake Score" (complete options selected)
   | Diagrams produced    | ___ (list types)                            |
   | Stale diagrams found | ___                                         |
   | Unresolved decisions | ___ (listed below)                          |
+  | Reality rows         | ___/___ rows (PLAN_REALITY), ___ unverified |
   +====================================================================+
 ```
 
@@ -1052,9 +1057,8 @@ Historical source "claude" is a native subagent; "claude-code" is the external C
 Do not infer old providers or unknown models from today's harness. A native result
 does not fill missing, disabled or skipped outside coverage.
 
-**Source attribution:** Append a recorded `via` to the suffix, for example
-"CLEAR (PLAN via /autoplan)" or "CLEAR (DIFF via /ship)". Without `via`, keep
-"CLEAR (PLAN)" or "CLEAR (DIFF)". Below the dashboard, group `autoplan-voices`
+**Source attribution:** Append a recorded `via` to the suffix ("CLEAR (PLAN via
+/autoplan)"); without one, keep "CLEAR (PLAN)" or "CLEAR (DIFF)". Below the dashboard, group `autoplan-voices`
 and `design-outside-voices` by workflow run and phase. Show each phase's provider
 and outside_status; retain partial coverage. These details do not clear Eng Review.
 
@@ -1063,8 +1067,7 @@ and outside_status; retain partial coverage. These details do not clear Eng Revi
 - **Content-first rule:** For `review`, `adversarial-review`, `codex-review`,
   ship-stage reviews and `design-review-lite`, use `review_freshness.status`
   and show its `reason`. CURRENT means a completed clean review whose start and
-  end content fingerprints equal the current `---WTREE---` fingerprint. This
-  fingerprint covers working-tree content, not just the commit.
+  end content fingerprints equal the current `---WTREE---` fingerprint.
   STALE or UNVERIFIED cannot clear Eng Review. Missing `review_freshness`,
   including legacy log-only records, means UNVERIFIED. Never fall back to HEAD
   equality or commit distance for diff evidence, even at zero commits.
@@ -1073,12 +1076,11 @@ and outside_status; retain partial coverage. These details do not clear Eng Revi
 - **Plan records** (plan-ceo-review, plan-eng-review, plan-design-review and
   codex-plan-review) use the 7-day window, not the working-tree fingerprint.
   If `plan_sha256` is present, you may compare the plan file and report a mismatch.
-  For plan records only, compare the recorded commit with `---HEAD---`.
-  If different, run `git rev-list --count STORED_COMMIT..HEAD` and report
+  Compare the recorded commit with `---HEAD---`; if different, run
+  `git rev-list --count STORED_COMMIT..HEAD` and report
   "Note: {skill} review from {date} may be stale — {N} commits since review".
-  A failed command means UNKNOWN, treated as stale. Without commit tracking,
-  retain the note to consider re-running. Omit staleness notes when all reviews
-  are current.
+  A failed command means UNKNOWN, treated as stale; without commit tracking,
+  suggest a re-run. Omit notes when all reviews are current.
 
 **3. Choose the historical verdict.** CLEARED requires the selected Eng Review
 to be `clean`, within 7 days and fresh under step 2. Otherwise report NOT CLEARED

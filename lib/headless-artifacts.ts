@@ -14,6 +14,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { ResultCodeName } from './result-codes';
+import { withFileLock } from './spend-ledger';
 
 export type Severity = 'Critical' | 'High' | 'Medium' | 'Low' | 'Informational';
 export type Disposition = 'open' | 'accepted' | 'partially_accepted' | 'rejected' | 'deferred' | 'fixed';
@@ -28,7 +29,7 @@ export type RunStatus = ResultStatus | 'awaiting_result' | 'running';
 export interface FindingRow {
   schema_version: 1; run: string; id: string; phase: string; voice: Voice; severity: Severity; title: string;
   model?: string; file?: string; line?: number; disposition?: Disposition; resolution?: string;
-  plan_items?: string[]; native_counterpart?: string; source?: string;
+  plan_items?: string[]; native_counterpart?: string | null; source?: string;
 }
 export interface DecisionRow {
   schema_version: 1; run: string; id: string; title: string; options: string[]; recommended: string | null;
@@ -57,12 +58,27 @@ export interface RunManifest {
   base?: string; host?: string; session_kind?: string; gate_rev?: number; gate?: Record<string, unknown>;
   consumed_by?: Array<{ consumer: string; at: string }>; deviations?: string[]; [extra: string]: unknown;
 }
-export interface PregateCheck { id: string; status: 'pass' | 'fail' | 'warn' | 'incomplete' | 'requires-remote' | 'not_installed'; ms?: number; detail?: string }
-export interface PregateFile { schema_version: 1; tree: string; checks: PregateCheck[]; run?: string; stage1_ms?: number; stage2_ms?: number }
+export interface PregateCheck {
+  id: string; status: 'pass' | 'fail' | 'warn' | 'incomplete' | 'requires-remote' | 'not_installed'; ms?: number; detail?: string;
+  // C-pregate (C8): stage, the input identity the check ran against, the fix clause and result code, and per-item lines.
+  stage?: 'preflight' | 'tests'; inputs?: Record<string, string>; fix?: string; code?: string; lines?: string[];
+}
+export interface PregateRemote { lane: string; platform: string; workflow: string; job: string; tests: string[]; receipt: string | null; cleared_by?: string }
+export interface PregateFile {
+  schema_version: 1; tree: string; checks: PregateCheck[]; run?: string; stage1_ms?: number; stage2_ms?: number;
+  // C-pregate (C8): head/base identity, the policy sources, persisted requires-remote obligations and the one-line verdict.
+  head?: string; base?: string; generated_at?: string; policy?: string; registry?: string; requires_remote?: PregateRemote[]; verdict?: string;
+}
 export interface ShipReceipt {
   schema_version: 1; head: string; base: string; pr?: number; version?: string; gated_tree?: string;
   gate?: Record<string, unknown>; ci?: Record<string, unknown>; spend_usd?: number | string; predecessor?: string;
   session_kind?: string; artifacts_consumed?: string; run?: string;
+  // C-stamp (C3/C5/C7): the tree receipt's verdicts and the policy provenance, all optional.
+  thread?: string; tree?: string; gate_reuse?: string; policy?: string; queue_mode?: string; preregistration?: string; history?: string;
+  // C-pregate (C8): the pre-gate's verdict against this head and its remote obligations (publication requires their receipts).
+  pregate?: string; requires_remote?: string[];
+  // C-pregate (C6): issue links the body carries, by intent.
+  issues?: { fixes: number[]; refs: number[]; flakes: Array<{ issue: number; run: string }> };
 }
 
 export const RESULT_STATUSES: readonly ResultStatus[] = ['complete', 'gate_pending', 'incomplete', 'interrupted', 'refused'];
@@ -162,7 +178,9 @@ export const ARTIFACT_SCHEMAS = {
     type: 'object', required: ['schema_version', 'tree', 'checks'],
     properties: {
       schema_version: { const: 1 }, run: str, tree: str, stage1_ms: num, stage2_ms: num,
-      checks: { type: 'array', items: { type: 'object', required: ['id', 'status'], properties: { id: str, status: { enum: ['pass', 'fail', 'warn', 'incomplete', 'requires-remote', 'not_installed'] }, ms: num, detail: str } } },
+      checks: { type: 'array', items: { type: 'object', required: ['id', 'status'], properties: { id: str, status: { enum: ['pass', 'fail', 'warn', 'incomplete', 'requires-remote', 'not_installed'] }, ms: num, detail: str, stage: { enum: ['preflight', 'tests'] }, inputs: { type: 'object' }, fix: str, code: str, lines: strList } } },
+      head: str, base: str, generated_at: str, policy: str, registry: str, verdict: str,
+      requires_remote: { type: 'array', items: { type: 'object', required: ['lane', 'platform', 'tests', 'receipt'], properties: { lane: str, platform: str, workflow: str, job: str, tests: strList, receipt: nullableStr, cleared_by: str } } },
     },
   },
   'ship-receipt': {
@@ -171,6 +189,9 @@ export const ARTIFACT_SCHEMAS = {
       schema_version: { const: 1 }, pr: { type: 'integer' }, head: str, version: str, base: str, gated_tree: str,
       gate: { type: 'object' }, ci: { type: 'object' }, spend_usd: { type: ['number', 'string'] }, predecessor: str,
       session_kind: str, artifacts_consumed: { ...str, description: '<n>/<m>' }, run: str,
+      thread: str, tree: { enum: ['same-modulo-stamps', 'changed', 'not-compared'] }, gate_reuse: str, policy: str, queue_mode: str, preregistration: str, history: str,
+      pregate: { ...str, description: 'pass|warn|requires-remote cleared … @<tree> from pregate.json, current for this head' }, requires_remote: strList,
+      issues: { type: 'object', properties: { fixes: { type: 'array', items: { type: 'integer' } }, refs: { type: 'array', items: { type: 'integer' } }, flakes: { type: 'array', items: { type: 'object', required: ['issue', 'run'], properties: { issue: { type: 'integer' }, run: str } } } } },
     },
   },
 } as const satisfies Record<string, Schema>;
@@ -496,6 +517,10 @@ export function urgentBlockPrecedes(text: string, summaryMarker = '### Plan Summ
 export interface AckResult { consumed_by: Array<{ consumer: string; at: string }>; added: boolean; analytics: 'appended' | 'skipped_ephemeral' | 'already_acked' }
 export function ackRun(runJson: string, consumer: string, opts: { analyticsPath: string; ephemeral: boolean; now?: Date }): AckResult {
   if (!/^[A-Za-z0-9_.:@/-]{1,200}$/.test(consumer)) throw new Error(`consumer id must match [A-Za-z0-9_.:@/-]{1,200}, got ${JSON.stringify(consumer)}`);
+  // Exactly once across concurrent consumers: the read-modify-write runs under a file lock.
+  return withFileLock(runJson, () => ackLocked(runJson, consumer, opts));
+}
+function ackLocked(runJson: string, consumer: string, opts: { analyticsPath: string; ephemeral: boolean; now?: Date }): AckResult {
   const manifest: RunManifest = JSON.parse(fs.readFileSync(runJson, 'utf8'));
   const list = Array.isArray(manifest.consumed_by) ? manifest.consumed_by : [];
   if (list.some(c => c.consumer === consumer)) return { consumed_by: list, added: false, analytics: 'already_acked' };

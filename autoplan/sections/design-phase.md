@@ -77,7 +77,7 @@ _CODEX_SEL=$(echo "$_CODEX_OUT" | sed -n 's/^CODEX_SEL: //p')
 _CODEX_SANDBOX_MODE=$(echo "$_CODEX_OUT" | sed -n 's/^CODEX_SANDBOX: //p')
 "$_CODEX_PROBE" show-first-use-notice
 _OUTSIDE_EXIT=0
-"$_CODEX_PROBE" run-with-timeout 540 codex exec - -C "$_REPO_ROOT" -s "${_CODEX_SANDBOX_MODE:?}" -c "model=\"${_CODEX_SEL:?}\"" -c skills.include_instructions=false -c 'model_reasoning_effort="high"' -c 'web_search="cached"' --json -o "$_OUTSIDE_TMP/text" <"$_OUTSIDE_INPUT" >"$_OUTSIDE_TMP/events" 2>"$_OUTSIDE_TMP/stderr" || _OUTSIDE_EXIT=$?
+"$_CODEX_PROBE" run-with-timeout --effort high 540 codex exec - -C "$_REPO_ROOT" -s "${_CODEX_SANDBOX_MODE:?}" -c "model=\"${_CODEX_SEL:?}\"" -c skills.include_instructions=false -c 'web_search="cached"' --json -o "$_OUTSIDE_TMP/text" <"$_OUTSIDE_INPUT" >"$_OUTSIDE_TMP/events" 2>"$_OUTSIDE_TMP/stderr" || _OUTSIDE_EXIT=$?
 cat "$_OUTSIDE_TMP/text" 2>/dev/null || tail -n 20 "$_OUTSIDE_TMP/events"
 if [ "$_OUTSIDE_EXIT" -eq 124 ]; then
   "$_CODEX_PROBE" log-event codex_timeout "540" || true
@@ -96,7 +96,7 @@ echo 'OUTSIDE_STATUS: completed provider=codex host=claude'
 
 Use Bash `timeout: 600000`; show the full response in a `tool-output` fence. Require successful execution and valid markers. Refusal, empty/malformed output, missing score/severity/completion markers, timeout or CLI failure means `outside_status: unavailable`. P0/P1 findings block like native ones; `OUTSIDE_STATUS: unverified` is missing coverage. Use the caller's fallback; missing coverage is never clean/PASS. After either outcome, delete only your private prompt; scratch cleanup is automatic.
 
-Failed/incomplete outside review → unavailable; disabled → skip outside. Both retain the native pass.
+Failed/incomplete outside review → unavailable; disabled → skip outside. Both keep the native pass.
 
 Retain the historical review-log skill ID; add `"host":"claude","outside_provider":"codex","outside_status":"completed|unavailable|disabled|skipped","phase":"design"`. Record differing attempt outcomes separately. `source:"codex"` requires completed CLI output; native uses `source:"in-host"` (historical `source:"claude"`: native Claude). Availability/native fallback is not outside completion. Preserve all reported modelUsage; unknown model identity stays unknown. Under `GSTACK_CODEX_NO_SANDBOX=1` add `"codex_sandbox":"danger-full-access"`.
 

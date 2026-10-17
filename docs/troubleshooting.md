@@ -630,6 +630,78 @@ has nothing to calibrate from. It no longer says "calibrated".
 
 **Fix.** Answer more registered questions, then `gstack-developer-profile --derive`.
 
+<a id="artifact-case-collision"></a>
+### `ARTIFACTS_SYNC: attention: case-collision held=<N> names=<names>. Artifact paths differ only by letter case, ...`
+
+**Meaning.** The artifacts repo holds paths that differ only by letter case,
+such as `projects/MyApp/` and `projects/myapp/`. A Mac or Windows disk stores
+them as one file, so git there would stage a write under the other spelling,
+and sync would report success while one spelling stays modified and the other
+machines read stale data (#3220). Sync now holds every queued file under such a
+path instead of staging it: the file stays queued, everything else keeps
+syncing, and the status is `collision` rather than `ok`. When only one
+spelling is tracked, that spelling keeps syncing and only the new alias is
+held; when neither is tracked yet, both wait. `<names>` are the colliding folder or file names; `gstack-brain-sync
+--status` lists the held paths in `message`. A local commit that would push a
+new alias to the remote (two machines created both spellings at once) is
+refused with status `error` and kept locally.
+
+Nothing is repaired automatically. Slug resolution and skill start are
+unaffected; only the sync holds files.
+
+**Fix.** Keep one spelling, by hand, on one machine:
+
+1. Choose the spelling to keep: the one `gstack-slug` prints in that project
+   today. If the project resolves to different spellings (a remote URL typed
+   two ways, a folder reached as `~/code/MyApp` and `~/code/myapp`), make it
+   stable first: fix the remote URL's case, or set `GSTACK_PROJECT_SLUG`.
+2. Fold the other spelling's tracked files into the kept one. Read both
+   spellings from git, because a Mac's working tree shows only one of them,
+   and the working files too, because they hold the held, unsynced writes.
+   This loop covers the dropped spelling's tracked files and its untracked
+   ones (held writes that never synced). It folds JSONL logs (concatenated,
+   duplicate lines dropped) and prints every other file for you to decide:
+
+   ```bash
+   cd ~/.gstack
+   keep=projects/MyApp; drop=projects/myapp
+   { git -c core.ignorecase=false ls-files -- "$drop"; git -c core.ignorecase=false ls-files --others -- "$drop"; } | sort -u | while IFS= read -r f; do
+     rel=${f#"$drop"/}
+     case "$rel" in *.jsonl) ;; *) echo "decide by hand: $f"; continue ;; esac
+     { git show ":$keep/$rel"; git show ":$f"; cat "$keep/$rel" "$f"; } 2>/dev/null | awk '!seen[$0]++' > "$HOME/.gstack-fold.tmp"
+     mkdir -p "$keep/$(dirname "$rel")" && mv "$HOME/.gstack-fold.tmp" "$keep/$rel"
+     git -c core.ignorecase=false add -f -- "$keep/$rel"
+     git -c core.ignorecase=false rm -q --cached --ignore-unmatch -- "$f"
+     echo "folded: $keep/$rel"
+   done
+   ```
+
+   For each file it prints (Markdown, JSON snapshots such as
+   `decisions.active.json`), compare `git show ":$keep/<file>"` with
+   `git show ":$drop/<file>"`, write the content to keep to `"$keep/<file>"`,
+   then run the same `git -c core.ignorecase=false add -f -- "$keep/<file>"`
+   and `git -c core.ignorecase=false rm -q --cached --ignore-unmatch -- "$drop/<file>"`. Never
+   concatenate a JSON snapshot. Then commit and push:
+
+   ```bash
+   git -c core.ignorecase=false commit -m "repair: fold $drop into $keep"
+   git push origin HEAD
+   ```
+
+   On Linux the two folders are separate on disk: after the commit, check
+   that `git -c core.ignorecase=false ls-files --others -- "$drop"` lists
+   nothing you have not folded or moved, then remove the dropped folder
+   (`rm -r "$drop"`). On a Mac or Windows they are the same folder, so do
+   not remove anything.
+3. Clear the held records of the dropped spelling and queue the kept files:
+   `gstack-brain-sync --skip-file <dropped path>` for each held path that
+   `--status` lists, then `gstack-brain-enqueue <kept path>` for each
+   `folded:` line and each file you moved by hand, and
+   `gstack-brain-sync --once`.
+4. On every other machine, let the next skill start pull the repair (or run
+   `git -C ~/.gstack pull`). The line disappears once no tracked path
+   differs only by case.
+
 <a id="skill-start-former-bucket"></a>
 ### `gstack: earlier data for this project is in projects/<slug> (a worktree's old bucket). Merge it: ...`
 
@@ -1204,8 +1276,18 @@ or too large. Each message names the cap that applied:
   withheld from the audit.
 - **Symlinks.** A tracked symlink anywhere in the repository stops the run.
 
-**Fix.** No setting raises these caps. Run /cso on a smaller checkout that
-holds the code you want audited and no symlinks. Add your file count or size to
+**Fix.** No setting raises these caps. For the 64 MiB source cap, rerun with
+`--paths` set to the comma-separated repo-relative directories you want audited
+(for example `--paths src/core,src/mcp`). Paths outside them are never
+captured or assessed and do not count toward the cap; snapshot and history
+coverage then read **partial**, the report counts every skipped path, and the run's
+snapshot manifest lists each one, so the verdict says what was not audited.
+With `--diff`, every changed path outside dependency directories must be inside
+`--paths`, or the run is refused. Do not audit a hand-trimmed copy: /cso would treat it as the whole
+repository and report nothing as skipped. `--paths` does not lower the
+manifest cap or the 100,000-entry limit, because every skipped path still has a
+manifest entry (about 50,000 files fit). Symlinks must be removed. Add your
+file count or size to
 [#2993](https://github.com/garrytan/gstack/issues/2993).
 
 <a id="cso-scanner-invalid-output"></a>
@@ -1403,15 +1485,20 @@ machine, say). Each session start writes a workflow lease,
 anything because a lease whose pid is alive and not in its own process
 ancestry exists: fast-forwarding would change gstack under a session
 mid-workflow. Leases older than 120 minutes are pruned; a lease whose
-process has exited never blocks. The upgrader's own session (the pid chain it
+process has exited never blocks, and neither does a stale one: each lease
+records its process's start identity, so a pid reused after a reboot or a
+machine wake (GBRA-105's lease named pid 379, which had become dbus-daemon)
+is reclaimed instead of blocking. The upgrader's own session (the pid chain it
 runs under) never counts.
 
 **Fix.** Wait for those sessions to finish (`bin/gstack-lease list` shows
-every lease with its age and `alive|dead`), then re-run `bin/gstack-upgrade`.
+every lease with its age and `alive|dead|stale`; a holder is named as
+`pid <p> (<age>m <command>)`), then re-run `bin/gstack-upgrade`.
 When you know they are idle, `GSTACK_UPGRADE_FORCE=1 bin/gstack-upgrade`
 proceeds. At a Capy session start the same refusal appears as
-`SELF_UPGRADE: skipped (live gstack sessions hold this installation: ...)`
-and the session continues on the installed revision.
+`SELF_UPGRADE: skipped (live gstack sessions hold this installation: ...)`,
+and the trailer is `gstack: fail behind — … (UPGRADE_BUSY)`: a session that
+could not upgrade is never certified ok.
 
 <a id="upgrade-fetch-failed"></a>
 ### `gstack-upgrade: could not reach origin (...) (UPGRADE_FETCH_FAILED)`
@@ -1443,15 +1530,64 @@ revision at or above the minimum. An interrupted install after the
 fast-forward leaves the trailer `fail`; the next install run completes it.
 
 <a id="capy-wrapper-stale"></a>
-### `gstack-capy-skill: owner action — Drive copy is wrapper <n>, minimum <m>; copy <root>/capy/skill/gstack/ (CAPY_WRAPPER_STALE)`
+### `FAIL wrapper — ... (CAPY_WRAPPER_STALE)` / `WARN wrapper — ...; owner action: ...` / `gstack-capy-skill: owner action — Drive copy is wrapper <n>, minimum <m>; ...`
 
-**Meaning.** The Capy skill folder that ran (the bootstrapper's
-`GSTACK_CAPY_WRAPPER`) is older than the checkout's `GSTACK_CAPY_MIN_WRAPPER`.
-The run continues through the checkout's own wrapper (`bin/gstack-capy-session`);
-only a checkout with no such wrapper refuses (`gstack: fail wrapper`).
+**Meaning.** The Capy skill folder is older than the checkout's
+`GSTACK_CAPY_MIN_WRAPPER` (`capy/support.env`). The doctor's `wrapper` row
+decides by the active wrapper's provenance (`GSTACK_CAPY_WRAPPER_REV` and
+`GSTACK_CAPY_WRAPPER_PATH`, exported by the bootstrapper): a current active
+wrapper passes, and a stale Drive copy elsewhere is a `WARN` row, an owner
+action that never fails the run. Without provenance (a direct
+`gstack-doctor --check`, or a pre-bootstrapper copy with no
+`GSTACK_CAPY_WRAPPER=` line, which reads as wrapper 0) it reads the Drive
+copies (`~/.capy/drive/*/skills/gstack/scripts/install.sh`, or only
+`GSTACK_CAPY_WRAPPER_PATH` when set) and fails only when every copy is stale,
+listing each with its revision. A stale active wrapper is a `WARN` too: an
+older copy still works (`capy/support.env`). `bin/gstack-upgrade` runs the
+installer with the checkout's own copy as the active wrapper and never leaves
+a pending reinstall when the wrapper row is the only failure.
 
-**Fix.** The owner copies `<checkout>/capy/skill/gstack/` over the skill folder
-(on Capy, the user-scope Drive `skills/gstack/`). Agents never write it.
+**Fix.** This session: run the checkout's own copy,
+`bash <checkout>/capy/skill/gstack/scripts/install.sh --check --for <skill>`;
+it carries current provenance, so it certifies with the stale Drive copy left
+unchanged. Owner: copy `<checkout>/capy/skill/gstack/` over the Drive skill
+folder (on Capy, the user-scope Drive `skills/gstack/`), or have Capy re-sync
+it. The message recurs every session until the Drive copy changes. Agents never
+write the skill folder.
+
+<a id="bun-resolution-drift"></a>
+### `FAIL runtime — bun resolution drifted: recorded bun <v> at <path> (<rule>), now <current>; changed: <what>; fix: ... (BUN_RESOLUTION_DRIFT)`
+
+**Meaning.** Install and `--check` resolve Bun through one contract
+(`gstack_bun_resolve` in `bin/gstack-bun-version.sh`, twinned by `resolveBun`
+in `lib/pregate/runtime.ts`): the project's exact pin and gstack's install
+default in the runtime store (`<state root>/runtimes/bun/<version>/bun`),
+`$BUN_INSTALL/bin`, `~/.bun/bin`, then PATH; the first Bun that satisfies
+gstack's minimum and every project pin wins. Install records the pick in the
+install verdict for this checkout and project (`bun_path`, `bun_version`,
+`bun_rule`). The recorded Bun is gone, reports another version (replaced in
+place), or no longer satisfies gstack's minimum and the project's pins. A
+different candidate that would now resolve first (a store Bun another
+project's install published, a changed `BUN_INSTALL`) is not drift: `--check`
+keeps the recorded Bun, prints `note: the recorded bun ... stays certified`
+and names the installer run that records the new pick. The pregate's lanes and
+guards (`lib/pregate/runtime.ts`) and the workflow start refuse with this code
+when the Bun the verdict recorded is gone or changed.
+
+**Fix.** Run the row's fix: the installer, which records the current pick, or,
+when nothing eligible remains, re-downloads a verified Bun into the store. The
+next `--check` passes.
+
+<a id="bun-install-version-invalid"></a>
+### `gstack-capy-install: GSTACK_BUN_INSTALL_VERSION=<v> is not a verified Bun at or above gstack's supported minimum ...; fix: ... (BUN_INSTALL_VERSION_INVALID)`
+
+**Meaning.** `GSTACK_BUN_INSTALL_VERSION` overrides the Bun the installer
+downloads when no exact project pin decides (`GSTACK_BUN_DEFAULT`, 1.4.3). It
+must be listed in `GSTACK_BUN_VERIFIED` (a SHA-256-verified archive) and sit at
+or above the supported minimum (`GSTACK_BUN_TESTED`). Nothing was installed.
+
+**Fix.** Unset the variable, or set it to one of the verified versions the
+message lists.
 
 <a id="install-unverified"></a>
 ### `INSTALL: fail verdict — <detail>; fix: ... (INSTALL_UNVERIFIED)`
@@ -2692,13 +2828,19 @@ and Heavy-only files included.
 <a id="pregate-no-lane"></a>
 ### `PREGATE_NO_LANE`
 
-**Meaning.** A touched file maps to no test through static imports, repo-path
-string literals, the `bin/<name>` → `test/<name>*.test.ts` convention or a
-`dependencies` declaration. That is a failure, not a pass.
+**Meaning.** A touched source file maps to no test through static imports,
+repo-path string literals, the `bin/<name>` → `test/<name>*.test.ts` convention
+or a `dependencies` declaration. That is a failure, not a pass. Markdown no
+test depends on is a docs/no-tests empty lane and is not this error, whether
+or not the name says plan, evidence or redproof. A test that reads one of
+those files (a quoted path or a `join()` of path segments) still selects that
+test. An unmapped source or code file still fails. A file under a test
+directory is not this empty lane.
 
 **Fix.** Add a test that names the file, or declare its lane (an explicit `[]`
-for files with no behaviour, such as docs) in `.gstack/pregate.json`. `--explain`
-prints every mapping and why. For a file with no lane it also prints the import
+for files with no behaviour) under `dependencies` in `.gstack/pregate.json`.
+Other non-Markdown documentation goes in `empty_lanes` on the base branch.
+`--explain` prints every mapping and why. For a file with no lane it also prints the import
 specifiers in test files that resolved to no repo file (for example a
 `tsconfig.json` `paths` alias such as `@/lib/x` whose target is missing) and any
 `extends` hop that was not followed (only relative `extends`, at most 4 hops). If
@@ -2723,6 +2865,35 @@ pass and blocks publication.
 
 **Fix.** Pass `--allow-repo-commands`, install the tool, raise `--timeout`, or
 keep the tree still, then rerun.
+
+<a id="pregate-stalled"></a>
+### `PREGATE_STALLED`
+
+**Meaning.** A test command the lanes check (or a guard, or the `--remote`
+gate) launched wrote nothing to its log for the stall timeout (default 300 s,
+`stall_timeout_s` in the base branch's `.gstack/pregate.json`, or
+`--stall-timeout`). pregate killed its process group and names the last test
+file started. The check is incomplete, never pass.
+
+**Fix.** Open the printed log, find the hang in the named file (a blocked
+child, a server that never exits, a synchronous wait), fix it and rerun
+`gstack-pregate --stage tests`. A test that is legitimately quiet for longer
+needs a larger `--stall-timeout`; `0` disables the stall kill and leaves only
+`--timeout`.
+
+<a id="pregate-receipt-invalid"></a>
+### `PREGATE_RECEIPT_INVALID`
+
+**Meaning.** `gstack-pregate clear --remote pregate.json/remote_gate --receipt
+<file>` read the remote gate's output and its `PREGATE_REMOTE:` line is missing,
+names another tree than the one `pregate.json` tested, reports 0 tests, or
+reports failures. The obligation stays uncleared. A run URL alone never clears
+this obligation; a `test_backend/<backend>` obligation takes a run URL, recorded
+as attested rather than validated.
+
+**Fix.** Run the remote gate on the tree pregate tested and pass its output
+file with `--receipt`, or let `gstack-pregate --stage tests --remote --spend-cap
+<usd> --allow-repo-commands` run and validate it.
 
 <a id="pregate-stale"></a>
 ### `PREGATE_STALE`
@@ -2752,6 +2923,34 @@ could not be read through `gstack-issue-guard`.
 
 **Fix.** Check `gh auth status` and the number. Until it reads, the link is
 rendered as `Refs #N`, never `Fixes`.
+
+<a id="issue-lookup-failed"></a>
+### `ISSUE_LOOKUP_FAILED`
+
+**Meaning.** `gstack-issue-links` could not resolve the repository, list the open
+PRs that close an issue this PR fixes, search the flake issues naming a
+`--ci-run` id, or tell this PR's author: `gh` runs as an app (`…[bot]`) and
+neither the HEAD commit (unpushed, or not linked to a GitHub user) nor a
+user-owned repository names one, so the owner's own open PRs stay in the
+`Related:` lines. The closure and reference lines are still printed; `--json`
+lists each failure under `unavailable`.
+
+**Fix.** Check `gh auth status`, pass `--repo <owner/repo>` when the remote
+is not a GitHub repository and `--author <login>` when `gh` runs as an app,
+then rerun. If it still fails, say in the handoff
+which lookup is missing; never present the body as complete.
+
+<a id="issue-links-missing"></a>
+### `ISSUE_LINKS_MISSING`
+
+**Meaning.** `gstack-ship-receipt write --issues @issues.json --body <file>`
+found that the body lacks a `Fixes`, `Refs`, `Flake:`, `Related:`,
+`Supersedes` or `Contributed by` line the issues object records, so the PR
+body and its receipt would disagree. Nothing was written.
+
+**Fix.** Paste every line `gstack-issue-links` printed under `## Issues` in the
+body (or rerun `gstack-issue-links --out` if the issue set changed), then rerun
+the receipt write.
 
 ## Eval plans, lane ownership, evidence verification, the owner brief
 
@@ -3043,7 +3242,10 @@ incorporated or withdrawn; `export` refuses a `complete` run with one pending.
 **Fix.** Edit the plan, then `gstack-autoplan revise --out <dir> --plan <file>
 --incorporates <decision id,...>`. `revise` binds each named id to the old and
 new Implementation-plan hashes and refuses when the Implementation plan did
-not change; an id you do not name stays pending. To drop an accepted change
+not change; an id you do not name stays pending. A packaging or ordering change
+(its `APPLY:` line ends `no plan edit needed: revise --settle <id>`) is
+discharged with `gstack-autoplan revise --out <dir> --settle <id>` and reopens
+nothing. To drop an accepted change
 instead, `gstack-autoplan revise --out <dir> --withdraw <decision id>` records
 the withdrawal in the journal.
 
@@ -3058,6 +3260,100 @@ amendments), or it was already incorporated or withdrawn. Nothing was changed.
 **Fix.** Name only the ids the refusal lists after `pending:`. With none
 pending, revise without `--incorporates`:
 `gstack-autoplan revise --out <dir> --plan <file>`.
+
+<a id="amendment-not-settleable"></a>
+### `AMENDMENT_NOT_SETTLEABLE`
+
+**Meaning.** `gstack-autoplan revise --settle <id>` discharges an accepted change
+without a plan edit, which is honest only for a packaging or ordering change
+(the gate item's `changes` is `packaging` or `ordering`) on the plan the run
+already reviews: the plan the owner accepted it on, or one a later `revise`
+recorded. The named change alters scope, cost or direction, names no `changes`
+value, the plan file has edits no `revise` has recorded, or `--settle` came with
+a `--plan` that changes the Implementation plan while incorporating nothing.
+Nothing was changed.
+
+**Fix.** Edit the plan, then
+`gstack-autoplan revise --out <dir> --plan <file> --incorporates <decision id>`,
+adding `--settle <id>` to settle packaging or ordering changes in the same call
+(or settle them after the revise). The `APPLY:` line for each change says which
+path it takes, and `NEXT:` lists the settle step first.
+
+<a id="gate-rec-stale"></a>
+### `GATE_REC_STALE`
+
+**Meaning.** `gstack-autoplan recommend` changed a recommendation after the gate
+was rendered, so a `rec` (or `all`) reply the owner gave to the earlier render
+would take recommendations they never saw. Every render prints
+`rec_hash=<h>`; once `recommend` has run, a `rec` answer must name the hash of
+the render the owner answered. The same refusal meets a `rec`/`all` reply to a
+gate written before `rec` existed (a `gate.json` with no `rec_rev`, from
+1.91.101.0 or earlier): that render told the owner `all` leaves items
+recommended `b` pending, and `all` now takes them.
+
+**Fix.** Render again (`gstack-gate render <dir>/gate.json --all`), relay it,
+and answer with `--rec-hash <h>` from that render. Explicit `<id><option>`
+tokens are never refused.
+
+<a id="checkpoint-invalid"></a>
+### `CHECKPOINT_INVALID`
+
+**Meaning.** `gstack-autoplan resume --out <dir> --from <checkpoint>` found no
+generation it can restore: a `checkpoint.json` is unreadable or not a
+schema_version 1 checkpoint, a listed file is missing, is not a regular file,
+escapes the generation (an `..` path or a symlinked directory), or does not
+match its recorded sha256; or the staged run does not pass
+`gstack-artifact validate`. `--from` naming a run's collection restores the
+newest generation that verifies, skipping corrupt newer ones; a root holding
+several runs must name one. Nothing was written to `--out`.
+
+**Fix.** `gstack-autoplan checkpoints --from <dir>` lists every generation
+with `hash=ok` or `hash=bad (<reason>)`; restore an intact one by passing its
+directory. With `GSTACK_AUTOPLAN_CHECKPOINT_DIR` set, every command that
+leaves the run at rest publishes a new generation and keeps the previous one.
+
+<a id="checkpoint-overlap"></a>
+### `CHECKPOINT_OVERLAP`
+
+**Meaning.** The checkpoint directory for this run and the run directory (or,
+on restore, the checkpoint and `--out` or its staging directory) are the same
+directory or one contains the other, after resolving symlinks. Copying one
+into the other would replace or delete the live run, so nothing was touched.
+A checkpoint refusal after a committed command prints `CHECKPOINT: failed …`
+on stderr and leaves that command's exit code alone.
+
+**Fix.** Point `GSTACK_AUTOPLAN_CHECKPOINT_DIR` (or `--from` / `--out`) at a
+directory outside the run, for example the private project-user Drive folder.
+
+<a id="checkpoint-target-exists"></a>
+### `CHECKPOINT_TARGET_EXISTS`
+
+**Meaning.** `resume --from` restores only into a missing or empty `--out`
+directory, and this one already holds files.
+
+**Fix.** Pass a new `--out` directory, or run `gstack-autoplan resume --out
+<dir>` without `--from` to resume the run already there.
+
+<a id="owner-reply-required"></a>
+### `OWNER_REPLY_REQUIRED`
+
+**Meaning.** An agent answered the gate (`--by agent:<id>`) without recording
+what the owner actually said. Nothing was applied.
+
+**Fix.** Pass the owner's words verbatim: `--owner-reply "<text>"`,
+`--owner-reply -` to read them from stdin, or `--owner-reply-file <path>`. They
+are stored on every decision row; when they parse under the gate grammar they
+must resolve to the same choices as `--reply`.
+
+<a id="gate-owner-reply-mismatch"></a>
+### `GATE_OWNER_REPLY_MISMATCH`
+
+**Meaning.** The owner's verbatim reply is itself a gate reply (for example
+`rec`), and it resolves to different choices than the tokens the agent relayed.
+Nothing was applied.
+
+**Fix.** Relay what the owner chose; passing their reply as `--reply` is always
+consistent. When the owner's words and your tokens disagree, ask the owner.
 
 <a id="gstack-version-changed"></a>
 ### `GSTACK_VERSION_CHANGED`
@@ -3131,3 +3427,434 @@ unset, not in bare mode). Then re-run the review.
 
 **Expected result.** An `OUTSIDE VOICE (...)` report, or `CODEX SAYS (plan
 review — outside voice)` when the provider runs.
+
+<a id="artifact-machine-path"></a>
+### `ARTIFACT_MACHINE_PATH`
+
+**Meaning.** A public copy of an autoplan run still contains a path the run
+recorded on this machine: its run directory, the home directory, the plan's
+directory, the checkpoint directory or the worktree root. `gstack-artifact
+validate --public <dir> --private <run>/run.json` reports each hit with
+file:line; `gstack-autoplan export --public` runs that check on a staging copy
+and writes nothing when it fails.
+
+**Fix.** Export with `gstack-autoplan export --out <run> --public <dir>`, which
+rewrites recorded roots to repo-relative paths or `<local notes (not
+committed)>`. Export never rewrites inline code or fenced blocks in plan.md, so
+a hit there needs a plan edit: change the path, `revise`, and export again.
+Generic home-directory paths that are not recorded roots are WARN lines, not
+errors.
+
+<a id="artifact-public-target-exists"></a>
+### `ARTIFACT_PUBLIC_TARGET_EXISTS`
+
+**Meaning.** `gstack-autoplan export --public <dir>` found files in `<dir>`
+that are not an earlier public copy of the same run, and refused to overwrite
+them.
+
+**Fix.** Pass an empty or new directory, or the directory that already holds
+this run's public copy (it is replaced as a whole).
+
+<a id="prereg-diagnostic-untested"></a>
+### `PREREG_DIAGNOSTIC_UNTESTED`
+
+**Meaning.** `gstack-eval-plan prereg --check <file> --allow-repo-commands` ran
+the preregistration's declared summarizer (`## Diagnostics`: `summarizer:`,
+`fixture:` and one `| diagnostic | expected |` row each) on its synthetic
+fixture. Its result did not match the preregistered definitions: a count
+differed (`mismatch`), a declared diagnostic was absent (`missing`), it
+reported one nobody preregistered (`undeclared`), or the summarizer failed,
+timed out, or did not end its stdout with one JSON object of counts. Each
+`PREREG_DIAGNOSTIC:` line names one diagnostic. This is the gbrain-evals #162
+(D7) shape, where two diagnostic counts needed a post-paid amendment.
+
+**Fix.** Fix the summarizer, or correct the definition (the expected count or
+the fixture), until every line says `ok`. Then commit the freeze. The
+`PREREG_DIAGNOSTICS:` line's `sha256` binds the fixture you tested. Without
+`--allow-repo-commands`, the command lists the summarizer
+(`PREREG_COMMAND:`) and exits 3 (`REPO_COMMANDS_NOT_ALLOWED`), because the
+summarizer is a repository command.
+
+<a id="eval-models-invalid"></a>
+### `EVAL_MODELS_INVALID`
+
+**Meaning.** `.gstack/eval-models.json` could not be read or failed
+validation. Causes include JSON errors, `schema_version` other than 1, a
+missing or empty `allow`, an unknown key or scope, a glob in `families`, an id
+in two families, or a family that lists gstack's current catalog model after an
+older id. It also fires when `origin/<base>` cannot be resolved while a
+working-tree copy exists. While the rules are invalid, no arm passes.
+
+**Fix.** Correct the file as the line says (`docs/eval-models.md`) in a
+reviewed PR, or fetch the base branch. To test an unmerged edit, use
+`--models-from head`.
+
+<a id="eval-model-denied"></a>
+### `EVAL_MODEL_DENIED`
+
+**Meaning.** An arm's model matched `deny` or its scope's `deny`, matched no
+`allow` entry (unknown ids fail closed), or matched no entry of its scope's
+`allow` list. The `EVAL_MODEL:` line names the rule.
+
+**Fix.** Pick a model the rules allow for that scope. For a smoke run, pass
+`--scope smoke` (`price-gate` uses each call row's scope). To change the rule,
+edit `.gstack/eval-models.json` in a reviewed PR.
+
+<a id="eval-model-old-generation"></a>
+### `EVAL_MODEL_OLD_GENERATION`
+
+**Meaning.** The rules declare `families` (newest first), and an arm uses an id
+that is not the first one in its family.
+
+**Fix.** Use the family's newest id, which the `EVAL_MODEL:` line names. If the
+order is wrong, fix `families` in a reviewed PR.
+
+<a id="eval-model-generation-unresolved"></a>
+### `EVAL_MODEL_GENERATION_UNRESOLVED`
+
+**Meaning.** The rules declare `families`, so every arm must be its family's
+newest generation. This arm's model is in no family, so its generation cannot be
+checked, and the arm fails instead of passing unchecked.
+
+**Fix.** Add the model to its family (newest first) in
+`.gstack/eval-models.json` in a reviewed PR, or use a model a family lists.
+
+<a id="wtree-unavailable"></a>
+### `gstack-pregate: cannot fingerprint the working tree: bin/gstack-wtree could not start (on Windows, no Git Bash was found) or it ran and failed (<detail>); fix: <fix> (WTREE_UNAVAILABLE)`
+
+**Meaning.** `gstack-pregate` fingerprints the working tree with
+`bin/gstack-wtree` before any check runs, and refuses (exit 3) when it cannot.
+There are two causes, and the line says which:
+
+- **It could not start.** On Windows no Git Bash was found to run the script.
+  The detail lists every candidate tried with the reason it was rejected
+  (`GSTACK_GIT_BASH (unset): not set; git --exec-path …; install path …;
+  PATH bash: …`), in the order [`BASH_UNAVAILABLE`](#bash-unavailable)
+  describes. On macOS or Linux it means `bin/gstack-wtree` is missing.
+- **It ran and failed.** The detail is the script's own message, and the fix
+  is the repair it printed, for example `set TMPDIR to a writable directory`.
+
+Before this, both cases were reported as `policy source unavailable:
+origin/<base> is not a resolvable commit` with `git fetch` as the fix, which
+changed nothing.
+
+**Fix.** Run the fix the line prints. For the Windows case, point gstack at
+Git Bash's `bash.exe`, then rerun `gstack-pregate`:
+
+- Git Bash (this shell only): `export GSTACK_GIT_BASH='C:/Program Files/Git/bin/bash.exe'`
+- Windows PowerShell 5.1 or PowerShell 7 (this shell only):
+  `$env:GSTACK_GIT_BASH = 'C:\Program Files\Git\bin\bash.exe'`
+
+To set it for good (Claude Code reads it on its next start), follow the
+recipes under [`BASH_UNAVAILABLE`](#bash-unavailable), or install Git for
+Windows (`winget install --id Git.Git -e` in PowerShell).
+
+**With `--json`.** Every refusal before a check runs (this one, an
+unavailable base, an invalid pin file) is one JSON object on stdout,
+`{"ok":false,"status":"refused","code":"WTREE_UNAVAILABLE","detail":"…","fix":"…","docs":"…#wtree-unavailable"}`,
+with exit 3. A run's object carries the same `ok` and `status`
+(`complete` or `incomplete`), so `status` tells a refusal from a run. The
+`GSTACK_RESULT:` line goes to stderr under `--json`.
+
+<a id="claude-md-skill-list"></a>
+### `warn CLAUDE.md the gstack section in <file> lists <n> skills; Claude Code lists installed skills itself, and a pasted list goes stale with each release`
+
+**Meaning.** `gstack-doctor` found a gstack section in `~/.claude/CLAUDE.md`
+or in this project's `CLAUDE.md` that enumerates skills: an `Available
+skills:` line, or eight or more `/skill` names. Older install prompts asked
+for that list (#3169). Claude Code already lists every installed skill with
+its description, and a pasted list goes stale with each release, so the agent
+can take a partial list as the complete set.
+
+**Fix.** Replace the section with the short block the doctor prints (no skill
+list; keep any other gstack rules you wrote yourself):
+
+```
+## gstack
+Use /browse from gstack for all web browsing. Never use mcp__claude-in-chrome__* tools.
+```
+
+**Expected result.** The next `gstack-doctor` run shows
+`ok CLAUDE.md no gstack section lists skills (...)`.
+<a id="policy-gstack-too-old"></a>
+### `POLICY_GSTACK_TOO_OLD`
+
+**Meaning.** `.gstack/ship-policy.json` on the base branch sets
+`min_gstack_version` above the gstack reading it. The policy uses keys this
+gstack would read differently or not at all, so every ship-policy reader
+(`gstack-restamp`, `gstack-tree-receipt`, `gstack-ship-queue`,
+`gstack-ship-policy`) refuses it instead of guessing. A gstack older than
+`min_gstack_version` itself sees that key as unknown and fails with
+`POLICY_INVALID`, which names the key.
+
+**Fix.** Upgrade gstack to the version the message names
+(`bin/gstack-upgrade`, or rerun the session install), then rerun. A crew lead
+raising `min_gstack_version` raises the crew's install floor at the same
+time; `gstack-ship-policy validate` prints `MIN_READER:` for exactly that.
+
+<a id="queue-not-ready"></a>
+### `QUEUE_NOT_READY`
+
+**Meaning.** `gstack-ship-queue ready` will not print a READY block the
+coordinator could misread: the working tree has uncommitted tracked changes,
+HEAD is not the PR's pushed head (read through `gh pr view`), CI at that
+exact head is not green (failed, pending or unreadable), or the pregate result
+is missing, failed or recorded on another tree (`PREGATE_STALE`).
+
+**Fix.** Commit and push, wait for CI on that head, rerun
+`gstack-pregate run --allow-repo-commands` when the tree changed, then rerun
+`gstack-ship-queue ready --pr <n>`. The block it prints before refusing shows
+which line is not yet true.
+
+<a id="queue-proof-missing"></a>
+### `QUEUE_PROOF_MISSING`
+
+**Meaning.** A queue step lacks an input it needs to prove its claim, or an
+input does not match: the gated head is not a commit here, HEAD differs from
+the gated head beyond stamps (the gate never covered this tree), an earlier
+stamp with other inputs is unfinished, the stamp journal's head moved, or a
+gate-ahead merge could not be recomputed with `git merge-tree`. Nothing was
+written unless the `QUEUE_STAMP_REFUSED:` line says `committed=yes`.
+
+**Fix.** Supply the named input (fetch the gated head, pass the current base
+sha), or regate the tree you mean to stamp. For an unfinished stamp, rerun the
+identical command to resume, or revert its files and delete
+`.gstack/tmp/ship-queue/stamp-<pr>.json`.
+
+<a id="queue-stamp-not-stamp-only"></a>
+### `QUEUE_STAMP_NOT_STAMP_ONLY`
+
+**Meaning.** `gstack-ship-queue stamp` committed the stamp, and the tree
+receipt between the gated head and the stamped head found a difference
+outside the stamp rules (the residual paths are printed). The gate's result
+does not cover that head. The refusal line says `committed=yes <sha>`.
+
+**Fix.** Inspect the residual paths: drop the stray edit and stamp again, or
+run the gate on the stamped head.
+
+<a id="queue-verify-mismatch"></a>
+### `QUEUE_VERIFY_MISMATCH`
+
+**Meaning.** The coordinator's `gstack-ship-queue verify` could not
+reproduce the lane's claim from the PR's pushed commits: the head moved, the
+head differs from the gated tree beyond stamps, the receipt digest differs
+from the one in `QUEUE_STAMP`, or, for a gate-ahead record, `git merge-tree
+--write-tree` gives another merge tree, the recorded stamp patch does not
+rebuild the recorded gated tree or changes more than stamps, or the
+predecessor PR moved after the gate.
+
+**Fix.** Do not merge. Ask the lane to rerun `gstack-ship-queue stamp` (or
+`gate-ahead`) on the current queue and report again.
+
+<a id="queue-gate-missing"></a>
+### `QUEUE_GATE_MISSING`
+
+**Meaning.** The ship policy sets `full_e2e: true`, and no passing full-gate
+result is bound to the tree being stamped or verified: no recorded gate-ahead
+attempt for that gated head, no `--gate-exit 0 --gate-log <file>` from a run
+on it, or the recorded run exited non-zero.
+
+**Fix.** Run the gate the policy's `gate_command` names in the gate-ahead
+worktree and bind it with `gstack-ship-queue gate-ahead --record`, or pass the
+exit code and log of a passing run on the gated head to `stamp`.
+
+<a id="gate-ahead-attempt-invalid"></a>
+### `GATE_AHEAD_ATTEMPT_INVALID`
+
+**Meaning.** `gstack-ship-queue gate-ahead --record` could not bind the gate
+result: the attempt id is unknown for that PR, the attempt already holds a
+different result, the log file is missing, or the attempt's worktree no longer
+holds the gated commit (its HEAD moved or a tracked file changed), so the
+result would not describe the gated tree.
+
+**Fix.** `gstack-ship-queue gate-ahead --list --pr <n>` shows every attempt
+and the current one. Record the live attempt, or prepare a new one with
+`gate-ahead --after <pr>` and run the gate there without editing tracked
+files.
+
+<a id="pregate-timing-assertion"></a>
+### `PREGATE_TIMING_ASSERTION`
+
+**Meaning.** A test line the branch added or changed compares an elapsed
+wall-clock or CPU time against a bound, or sleeps for a fixed time and then
+asserts. Under machine load such a test fails without a code change. The
+`timing` check warns; it does not block (the measurement is in
+[docs/pregate.md#timing](pregate.md#timing)).
+
+**Fix.** Assert on the outcome instead: an injected clock, a forced deadline,
+an event or a poll with a deadline. When the bound is the contract, add
+`gstack-timing-ok: <reason>` in a comment on the line or the line above. Never
+raise a bound to make a flake pass; /investigate's flake playbook covers the
+diagnosis.
+
+<a id="approval-classes-invalid"></a>
+### `APPROVAL_CLASSES_INVALID`
+
+**Meaning.** The `.gstack/approval-classes.json` committed on the base branch
+(or, for `gstack-approval-classes validate`, the working-tree copy) is not
+valid JSON, has an unknown key, a class without a name or anything to match,
+or a glob that escapes the repository. `gstack-ship-receipt write` refuses
+rather than ship with the classes unchecked.
+
+**Fix.** Run `gstack-approval-classes validate`, correct the file, and merge
+it. See [Approval classes](ship-policy.md#approval-classes).
+
+<a id="approval-class-found"></a>
+### `APPROVAL_CLASS_FOUND`
+
+**Meaning.** `gstack-approval-classes check` found changes a declared class
+covers. Each `APPROVAL_CLASS:` line names the class and file:line, and each
+`APPROVAL_SCOPE: <class>@<digest12>` line is the token an approval binds to.
+Report-only lines from built-in detectors do not set this code.
+
+**Fix.** Ask the owner, then add
+`Approved by <owner> <YYYY-MM-DD> via <ref> for <class>@<digest12>` to the PR
+body. The token changes whenever an effect is added, removed or edited, so a
+later change needs a new approval.
+
+<a id="approval-citation-missing"></a>
+### `APPROVAL_CITATION_MISSING`
+
+**Meaning.** `gstack-ship-receipt write` found a declared approval class with
+no citation that both resolves and binds to the current effects, and wrote no
+receipt. The line lists every candidate citation and why it did not count:
+the plan's autoplan gate is not APPROVED, the comment is not by a ship-policy
+maintainer or not by the cited owner, the evidence names neither the scope
+token nor the class with every effect path (an approval of other work, or one
+given before an effect was added), or an unresolvable reference lacks a
+matching `for <class>@<digest12>` attestation.
+
+**Fix.** Cite the approval: a plan sha with `--approval-run <run dir>`, or the
+URL of a maintainer's comment or review that names the token. For evidence
+gstack cannot read (a thread code, a chat message), attest which scope it
+covers with `for <class>@<digest12>`; the receipt records it as
+`citation: unverified` for the coordinator.
+
+<a id="approval-source-unavailable"></a>
+### `APPROVAL_SOURCE_UNAVAILABLE`
+
+**Meaning.** `origin/<base>` does not resolve, so the committed approval
+classes cannot be read. `check` exits 3; `gstack-ship-receipt write`
+records `approval.status: unavailable` and prints `approval=unchecked`.
+
+**Fix.** `git fetch origin <base>` and rerun. The working-tree copy is never
+used.
+
+<a id="state-matrix-incomplete"></a>
+### `STATE_MATRIX_INCOMPLETE`
+
+**Meaning.** `gstack-state-matrix check` read the state-machines specialist's
+output and found a gap: a kind × owner action pair with no row, a row with no
+resulting row, a test reference that does not exist in the checkout, or an
+untested cell without a CRITICAL finding. A review whose matrix is incomplete
+has incomplete coverage, never a clean result.
+
+**Fix.** Rerun the state-machines specialist on the same diff and check its
+output again.
+
+## gstack-error-capture
+
+`gstack-error-capture` runs one target CLI for `/devex-review` Step 3 with no
+terminal, a scrubbed environment and a private temporary HOME, and prints one
+redacted JSON record. Its own failures print one stderr line,
+`gstack-error-capture: <what>; fix: <fix> (<CODE>)`, and no record. Exit 2 is a
+usage error, 3 a refusal, 1 a helper failure. `gstack-error-capture --help` lists
+every flag and code.
+
+<a id="dx-capture-usage"></a>
+### `gstack-error-capture: ... (DX_CAPTURE_USAGE)`
+
+**Meaning.** Gstack-error-capture arguments are malformed: an unknown flag, a flag missing its value, no `--`, or no command after it. Exit 2.
+
+**Fix.** Rerun as `gstack-error-capture [--deadline <s>] [--max-bytes <n>] [--pass-env NAME,...] [--copy-config <path>] [--cwd <dir>] [--approved] [--launch-check] -- <cmd> [args]`: flags before `--`, the command and its arguments after it.
+
+<a id="dx-capture-bad-deadline"></a>
+### `gstack-error-capture: ... (DX_CAPTURE_BAD_DEADLINE)`
+
+**Meaning.** --deadline is not a positive number of seconds (at most 3600, up to 3 decimals). Exit 2.
+
+**Fix.** Rerun with `--deadline 20`.
+
+<a id="dx-capture-bad-max-bytes"></a>
+### `gstack-error-capture: ... (DX_CAPTURE_BAD_MAX_BYTES)`
+
+**Meaning.** --max-bytes is not an integer from 1 to 1048576. Exit 2.
+
+**Fix.** Rerun with `--max-bytes 65536`.
+
+<a id="dx-capture-bad-pass-env"></a>
+### `gstack-error-capture: ... (DX_CAPTURE_BAD_PASS_ENV)`
+
+**Meaning.** --pass-env names an invalid or unset variable, or one the containment owns (PATH, HOME, XDG_CONFIG_HOME, TERM, USERPROFILE). Exit 2.
+
+**Fix.** Rerun with `--pass-env NAME with NAME set in the calling environment`.
+
+<a id="dx-capture-bad-cwd"></a>
+### `gstack-error-capture: ... (DX_CAPTURE_BAD_CWD)`
+
+**Meaning.** --cwd is not an existing directory. Exit 2.
+
+**Fix.** Rerun with `--cwd <existing directory> --approved`.
+
+<a id="dx-capture-approval-required"></a>
+### `gstack-error-capture: ... (DX_CAPTURE_APPROVAL_REQUIRED)`
+
+**Meaning.** --pass-env, --copy-config or --cwd was given without --approved; they hand the target credentials or real files. Exit 3.
+
+**Fix.** Ask the user to approve the named variables, files or directory, then add --approved.
+
+<a id="dx-capture-config-refused"></a>
+### `gstack-error-capture: ... (DX_CAPTURE_CONFIG_REFUSED)`
+
+**Meaning.** --copy-config names a missing file, a symlink, a non-regular file, a path outside HOME, a duplicate, or a file over 1 MiB. Exit 3.
+
+**Fix.** Rerun with `--copy-config <regular file under $HOME, no symlinks>`.
+
+<a id="dx-capture-not-found"></a>
+### `gstack-error-capture: ... (DX_CAPTURE_NOT_FOUND)`
+
+**Meaning.** The command does not resolve to an executable file; the record carries launch "not_found" and nothing ran. Exit 1.
+
+**Fix.** Install the command or pass its absolute path after --.
+
+<a id="dx-capture-temp-dir"></a>
+### `gstack-error-capture: ... (DX_CAPTURE_TEMP_DIR)`
+
+**Meaning.** The private 0700 containment directory under the gstack state root could not be created. Exit 1.
+
+**Fix.** Make $GSTACK_STATE_ROOT/error-capture a writable directory you own (not a symlink), then rerun.
+
+<a id="dx-capture-containment-unavailable"></a>
+### `gstack-error-capture: ... (DX_CAPTURE_CONTAINMENT_UNAVAILABLE)`
+
+**Meaning.** Process-group or Windows job containment is unavailable on this platform; nothing ran. Exit 1.
+
+**Fix.** Run the capture on Linux, macOS or Windows with job objects available.
+
+<a id="dx-capture-supervisor-failed"></a>
+### `gstack-error-capture: ... (DX_CAPTURE_SUPERVISOR_FAILED)`
+
+**Meaning.** The deadline supervisor failed before reporting a result. Exit 1.
+
+**Fix.** Rerun the same command once; if it repeats, run bin/gstack-qa-deadline --help to check the supervisor.
+
+<a id="dx-capture-interrupted"></a>
+### `gstack-error-capture: ... (DX_CAPTURE_INTERRUPTED)`
+
+**Meaning.** The helper received SIGINT, SIGTERM or SIGHUP; the target group was killed and no record was printed. Exit 1.
+
+**Fix.** Rerun the same command without interrupting it.
+
+<a id="dx-capture-redaction-failed"></a>
+### `gstack-error-capture: ... (DX_CAPTURE_REDACTION_FAILED)`
+
+**Meaning.** The finished record still matched a secret check, so nothing was printed. Exit 1.
+
+**Fix.** Do not rerun with more --pass-env; report the command name to the gstack maintainers.
+
+<a id="dx-capture-internal"></a>
+### `gstack-error-capture: ... (DX_CAPTURE_INTERNAL)`
+
+**Meaning.** Unexpected helper failure; the line names the error class and its first stack frame. Exit 1.
+
+**Fix.** Rerun once; if it repeats, report the printed frame to the gstack maintainers.

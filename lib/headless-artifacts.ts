@@ -23,7 +23,7 @@ export type DecisionKind = 'auto' | 'approval' | 'user_challenge';
 export type DecisionStatus = 'pending' | 'approved' | 'overridden' | 'rejected';
 export type TaskStatus = 'pending' | 'ready' | 'blocked_on_dependency' | 'blocked_on_decision' | 'in_progress' | 'done';
 export type VoiceStatus = 'completed' | 'unavailable' | 'disabled' | 'skipped' | 'failed' | 'pending' | 'running';
-export type ResultStatus = 'complete' | 'gate_pending' | 'incomplete' | 'interrupted' | 'refused';
+export type ResultStatus = 'complete' | 'gate_pending' | 'amend_pending' | 'incomplete' | 'interrupted' | 'refused';
 export type RunStatus = ResultStatus | 'awaiting_result' | 'running';
 
 export interface FindingRow {
@@ -39,6 +39,8 @@ export interface DecisionRow {
   answered_by?: string; source?: string; cost?: string;
   /** Why the recommendation (gate items built by gstack-autoplan), what a user challenge changes, and the carry-forward identity. */
   recommended_basis?: string; changes?: string; origin?: string; carried_from?: string; chosen_text?: string;
+  /** An agent-relayed answer: the owner's verbatim words, and whether they parsed under the gate grammar. */
+  owner_reply?: string; owner_reply_parsed?: boolean; recommended_by?: string;
 }
 export interface TaskRow {
   schema_version: 2; run: string; id: string; title: string; status: TaskStatus; depends_on: string[];
@@ -66,7 +68,7 @@ export interface PregateCheck {
   // C-pregate (C8): stage, the input identity the check ran against, the fix clause and result code, and per-item lines.
   stage?: 'preflight' | 'tests'; inputs?: Record<string, string>; fix?: string; code?: string; lines?: string[];
 }
-export interface PregateRemote { lane: string; platform: string; workflow: string; job: string; tests: string[]; receipt: string | null; cleared_by?: string }
+export interface PregateRemote { lane: string; platform: string; workflow: string; job: string; tests: string[]; receipt: string | null; cleared_by?: string; command?: string }
 export interface PregateFile {
   schema_version: 1; tree: string; checks: PregateCheck[]; run?: string; stage1_ms?: number; stage2_ms?: number;
   // C-pregate (C8): head/base identity, the policy sources, persisted requires-remote obligations and the one-line verdict.
@@ -80,12 +82,15 @@ export interface ShipReceipt {
   thread?: string; tree?: string; gate_reuse?: string; policy?: string; queue_mode?: string; preregistration?: string; history?: string;
   // C-pregate (C8): the pre-gate's verdict against this head and its remote obligations (publication requires their receipts).
   pregate?: string; requires_remote?: string[];
+  /** Approval classes (lib/approval-citations.ts): source, status, one record per declared class with hits, report-only built-in hits. */
+  approval?: Record<string, unknown>;
   // C-pregate (C6): issue links the body carries, by intent.
-  issues?: { fixes: number[]; refs: number[]; flakes: Array<{ issue: number; run: string }> };
+  // Related open PRs by other authors (Lane D): `supersedes` / `credit` only on the owner's confirmation.
+  issues?: { fixes: number[]; refs: number[]; flakes: Array<{ issue: number; run: string }>; related?: Array<{ pr: number; repo?: string; author: string; closes: number[]; supersedes?: boolean; credit?: boolean }> };
 }
 
-export const RESULT_STATUSES: readonly ResultStatus[] = ['complete', 'gate_pending', 'incomplete', 'interrupted', 'refused'];
-const TERMINAL_RUN: readonly string[] = ['complete', 'gate_pending', 'refused', 'incomplete'];
+export const RESULT_STATUSES: readonly ResultStatus[] = ['complete', 'gate_pending', 'amend_pending', 'incomplete', 'interrupted', 'refused'];
+const TERMINAL_RUN: readonly string[] = ['complete', 'gate_pending', 'amend_pending', 'refused', 'incomplete'];
 const TERMINAL_VOICE: readonly string[] = ['completed', 'unavailable', 'disabled', 'skipped', 'failed'];
 const RESOLVED: readonly string[] = ['accepted', 'partially_accepted', 'rejected', 'deferred', 'fixed'];
 
@@ -131,7 +136,7 @@ export const ARTIFACT_SCHEMAS = {
       voice: { enum: ['native', 'outside'] }, model: str, severity: { enum: ['Critical', 'High', 'Medium', 'Low', 'Informational'] },
       title: str, file: str, line: { type: 'integer' }, disposition: { enum: ['open', 'accepted', 'partially_accepted', 'rejected', 'deferred', 'fixed'] },
       resolution: str, plan_items: strList, native_counterpart: nullableStr, source: str,
-      changes: { enum: ['scope', 'cost', 'direction'] },
+      changes: { enum: ['scope', 'cost', 'direction', 'packaging', 'ordering'] },
     },
   },
   decisions: {
@@ -169,7 +174,7 @@ export const ARTIFACT_SCHEMAS = {
     required: ['schema_version', 'run', 'status', 'required_phases', 'phases', 'artifacts'],
     properties: {
       schema_version: { const: 1 }, run: str,
-      status: { enum: ['complete', 'gate_pending', 'incomplete', 'interrupted', 'refused', 'awaiting_result', 'running'] },
+      status: { enum: ['complete', 'gate_pending', 'amend_pending', 'incomplete', 'interrupted', 'refused', 'awaiting_result', 'running'] },
       base: str, host: str, session_kind: str, required_phases: strList,
       phases: { type: 'object', description: 'phase id → { snapshot, native, outside }', properties: {} },
       counts: { type: 'object', description: 'decisions, decisions_pending, findings, tasks: each must equal the rows in its file' },
@@ -185,7 +190,7 @@ export const ARTIFACT_SCHEMAS = {
       schema_version: { const: 1 }, run: str, tree: str, stage1_ms: num, stage2_ms: num,
       checks: { type: 'array', items: { type: 'object', required: ['id', 'status'], properties: { id: str, status: { enum: ['pass', 'fail', 'warn', 'incomplete', 'requires-remote', 'not_installed'] }, ms: num, detail: str, stage: { enum: ['preflight', 'tests'] }, inputs: { type: 'object' }, fix: str, code: str, lines: strList } } },
       head: str, base: str, generated_at: str, policy: str, registry: str, verdict: str,
-      requires_remote: { type: 'array', items: { type: 'object', required: ['lane', 'platform', 'tests', 'receipt'], properties: { lane: str, platform: str, workflow: str, job: str, tests: strList, receipt: nullableStr, cleared_by: str } } },
+      requires_remote: { type: 'array', items: { type: 'object', required: ['lane', 'platform', 'tests', 'receipt'], properties: { lane: str, platform: str, workflow: str, job: str, tests: strList, receipt: nullableStr, cleared_by: str, command: str } } },
     },
   },
   'ship-receipt': {
@@ -196,7 +201,8 @@ export const ARTIFACT_SCHEMAS = {
       session_kind: str, artifacts_consumed: { ...str, description: '<n>/<m>' }, run: str,
       thread: str, tree: { enum: ['same-modulo-stamps', 'changed', 'not-compared'] }, gate_reuse: str, policy: str, queue_mode: str, preregistration: str, history: str,
       pregate: { ...str, description: 'pass|warn|requires-remote cleared … @<tree> from pregate.json, current for this head' }, requires_remote: strList,
-      issues: { type: 'object', properties: { fixes: { type: 'array', items: { type: 'integer' } }, refs: { type: 'array', items: { type: 'integer' } }, flakes: { type: 'array', items: { type: 'object', required: ['issue', 'run'], properties: { issue: { type: 'integer' }, run: str } } } } },
+      approval: { type: 'object', description: 'approval classes: { source, status: checked|unavailable, classes: [{ class, scope, effects, citation: verified|unverified, approved_by, date, via, binding, evidence }], report_only }' },
+      issues: { type: 'object', properties: { fixes: { type: 'array', items: { type: 'integer' } }, refs: { type: 'array', items: { type: 'integer' } }, flakes: { type: 'array', items: { type: 'object', required: ['issue', 'run'], properties: { issue: { type: 'integer' }, run: str } } }, related: { type: 'array', items: { type: 'object', required: ['pr', 'author', 'closes'], properties: { pr: { type: 'integer' }, repo: str, author: str, closes: { type: 'array', items: { type: 'integer' } }, supersedes: { type: 'boolean' }, credit: { type: 'boolean' } } } } } },
     },
   },
 } as const satisfies Record<string, Schema>;
@@ -348,15 +354,17 @@ function checkPhases(m: RunManifest, out: ValidationError[]): void {
   if (!TERMINAL_RUN.includes(m.status)) {
     out.push({ code: 'ARTIFACT_RUN_INTERRUPTED', path: 'run.json.status', message: `status ${m.status} is not terminal` });
   }
+  // A run stopped by its budget (status incomplete with a stop object) records the phases it never reached as such, not as missing.
+  const stopped = m.status === 'incomplete' && !!(m as { stop?: unknown }).stop;
   for (const phase of m.required_phases ?? []) {
     const p = m.phases?.[phase];
-    if (!p) { out.push({ code: 'ARTIFACT_REVIEWER_MISSING', path: `run.json.phases.${phase}`, message: 'required phase absent' }); continue; }
+    if (!p) { if (!stopped) out.push({ code: 'ARTIFACT_REVIEWER_MISSING', path: `run.json.phases.${phase}`, message: 'required phase absent' }); continue; }
     for (const voice of ['native', 'outside'] as const) {
       const v = p[voice];
       if (!v || typeof v !== 'object') { out.push({ code: 'ARTIFACT_REVIEWER_MISSING', path: `run.json.phases.${phase}.${voice}`, message: 'voice has no outcome' }); continue; }
       checkSchema(v, voiceOutcome, `.phases.${phase}.${voice}`, out, 'run.json');
       if (['pending', 'running'].includes(String(v.status))) {
-        out.push({ code: 'ARTIFACT_RUN_INTERRUPTED', path: `run.json.phases.${phase}.${voice}.status`, message: `voice is still ${v.status}` });
+        if (!stopped) out.push({ code: 'ARTIFACT_RUN_INTERRUPTED', path: `run.json.phases.${phase}.${voice}.status`, message: `voice is still ${v.status}` });
       } else if (!TERMINAL_VOICE.includes(String(v.status))) {
         continue;
       }
@@ -473,6 +481,9 @@ function checkGateSettled(m: RunManifest, decisions: Record<string, unknown>[] |
   }
   for (const a of Array.isArray(m.amendments) ? m.amendments as Array<Record<string, unknown>> : []) {
     if (a.status === 'pending') out.push({ code: 'ARTIFACT_GATE_UNSETTLED', path: 'run.json.amendments', message: `plan amendment ${String(a.decision)} is still pending` });
+  }
+  for (const d of Array.isArray(m.capped_deltas) ? m.capped_deltas as Array<Record<string, unknown>> : []) {
+    if (d.status === 'pending') out.push({ code: 'ARTIFACT_GATE_UNSETTLED', path: 'run.json.capped_deltas', message: `the plan change after the ${String(d.phase)} round cap (revise v${String(d.k)}) was never put to the owner` });
   }
 }
 

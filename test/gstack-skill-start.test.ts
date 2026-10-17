@@ -611,8 +611,9 @@ describe('ARTIFACTS_SYNC attention lines (sync status table)', () => {
     status: code, held_count: 0, drainable: 0, last_drain_at: NOW(), last_push_at: NOW(), ts: NOW(), held: [], message: 'm', ...extra,
   });
 
-  const FIXTURES: Record<string, { status: () => Record<string, unknown>; queued?: number; n?: number }> = {
+  const FIXTURES: Record<string, { status: () => Record<string, unknown>; queued?: number; n?: number; names?: string }> = {
     held: { status: () => status('held', { held_count: 2 }), n: 2 },
+    'case-collision': { status: () => status('collision', { case_held: 2, case_names: 'MyApp,myapp' }), n: 2, names: 'MyApp,myapp' },
     blocked: { status: () => status('blocked') },
     push_failed: { status: () => status('push_failed') },
     error: { status: () => status('error') },
@@ -640,7 +641,7 @@ describe('ARTIFACTS_SYNC attention lines (sync status table)', () => {
       expect(fx).toBeDefined();
       const gh = syncHome(fx.status(), fx.queued ?? 0);
       try {
-        const expected = row.line.replaceAll('<bin>', SYNC).replaceAll('<N>', String(fx.n ?? 0));
+        const expected = row.line.replaceAll('<bin>', SYNC).replaceAll('<N>', String(fx.n ?? 0)).replaceAll('<names>', fx.names ?? '');
         expect(attention(runStart([], { GSTACK_HOME: gh }))).toEqual([expected]);
       } finally {
         fs.rmSync(gh, { recursive: true, force: true });
@@ -872,5 +873,28 @@ describe('gstack-skill-start install admission', () => {
     const r = start(gh, 'autoplan', { GSTACK_SESSION_KIND: 'unattended', GSTACK_CAPY: '1' }, path.join(runtime, 'bin/gstack-skill-start'));
     expect(r.status, r.stdout + r.stderr).toBe(0);
     expect(r.stdout).toContain('INSTALL_VERDICT: ok');
+  });
+});
+
+
+// PR gate run 38969924945 (ship-docsync-store): an agent ran `gstack-skill-start --help`
+// to learn the interface, and the script started an interactive session instead.
+describe('lifecycle --help', () => {
+  test.each([['gstack-skill-start', START], ['gstack-skill-end', END]])('%s --help prints usage and writes no state', (name, bin) => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-help-home-'));
+    const state = fs.mkdtempSync(path.join(os.tmpdir(), 'gstack-help-state-'));
+    try {
+      const out = execFileSync(bin, ['--help'], {
+        timeout: 30_000, encoding: 'utf-8', cwd: home,
+        env: { PATH: process.env.PATH!, HOME: home, GSTACK_HOME: state, GSTACK_STATE_ROOT: state, GSTACK_LEASE_DIR: path.join(state, 'leases') },
+      });
+      expect(out.split('\n')[0]).toStartWith(`Usage: ${name} --skill NAME`);
+      expect(out).not.toMatch(/^(?:SKILL_START_PROTO|SESSION_ID|SESSIONS):/m);
+      expect(fs.readdirSync(home)).toEqual([]);
+      expect(fs.readdirSync(state)).toEqual([]);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(state, { recursive: true, force: true });
+    }
   });
 });

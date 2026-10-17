@@ -13,7 +13,7 @@ Three bins, all over `lib/`:
 |---|---|---|
 | `gstack-regen` | `.gstack/generated.json` | generated files regenerate, never hand-merge |
 | `gstack-pregate` | `.gstack/pregate.json` | two-stage cheap gate, `pregate.json` record, publication check |
-| `gstack-issue-links` | — | `Fixes #N` only on explicit closure intent |
+| `gstack-issue-links` | — | `Fixes #N` only on explicit closure intent; Related PRs and validated flake issues |
 
 ## Trust boundary
 
@@ -59,6 +59,7 @@ the byte-pinned `/ship` renders in `test/fixtures/golden/`).
 |---|---|
 | `runner` | the local test command with `{files}` (gstack: `bun test {files}`); without it `lanes` is `incomplete` |
 | `dependencies` | glob → test files for subprocess targets, runtime reads and generated inputs the import graph cannot see; `[]` declares "no lane needed" (docs, licences) |
+| `empty_lanes` | extra globs for the docs/no-tests empty lane. Any Markdown file already qualifies with no pin file when no test depends on it (the same import graph as other files: a quoted path, a `join()` of path segments, an import, or a `dependencies` entry). README, CHANGELOG, CONTRIBUTING, LICENSE, AGENTS and CLAUDE qualify even without `.md`. Source code and files under a test directory never qualify. A test that reads the file still selects that test |
 | `selection` | `workflow.yml/job` → a command printing the lane's file list, for matrices a planner computes (gstack: `scripts/test-free-shards.ts --list`) |
 | `warn` | check ids downgraded to warn; `secrets` and required lanes never |
 | `strays.allow` | intentional root files or new top-level directories |
@@ -66,6 +67,8 @@ the byte-pinned `/ship` renders in `test/fixtures/golden/`).
 | `serial_patterns` | test-file globs the `lanes` check runs one process per file, apart from the unit files (default `**/*.serial.test.*`) |
 | `sealed` | sealed or eval output that must never reach a public destination; read by the pre-push hook and `gstack-pregate sealed` (see [sealed output](#sealed)) |
 | `price_file` | repo-relative path of the paid gate's call-plan data file (`GSTACK_EVAL_CALLS v1`); `gstack-eval-plan price-gate` prices from it and never executes anything ([docs/eval-calls.md](eval-calls.md)) |
+| `stall_timeout_s` | seconds a test command may print nothing before its process group is killed and the check is `incomplete` (`PREGATE_STALLED`); default 300, `0` disables; `--stall-timeout` overrides (see [supervision](#supervision)) |
+| `remote_gate` | the repo's remote test gate command; under 8 cores the local test tier becomes a `requires-remote` obligation naming it, and `--remote` runs it (see [remote gate](#remote-gate)) |
 
 Only the `origin/<base>` copy is honoured, so a downgrade is reviewed before it
 takes effect. `gstack-pregate validate` / `init` cover the working-tree file.
@@ -73,7 +76,8 @@ takes effect. `gstack-pregate validate` / `init` cover the working-tree file.
 ## `gstack-pregate`
 
 ```
-gstack-pregate [--stage preflight|tests|all] [--only <check,..>] [--allow-repo-commands] [--policy-from base|head] [--explain] [--json]
+gstack-pregate [--stage preflight|tests|all] [--only <check,..>] [--allow-repo-commands] [--policy-from base|head]
+               [--timeout <s>] [--stall-timeout <s>] [--remote --spend-cap <usd>] [--explain] [--json]
 gstack-pregate verify | clear --remote <workflow.yml/job> --run-url <url> | lanes | validate | init
 ```
 
@@ -94,6 +98,12 @@ Two stages with separate clocks, both printed:
   searched for the old value; a consumer the branch did not update fails with
   `file:line`.
 
+- `timing`: added or changed test lines that compare an elapsed wall-clock or
+  CPU time against a bound, or sleep and then assert, print
+  `TIMING_ASSERTION: <file>:<line> <pattern>` and a
+  `TIMING_ASSERTIONS: found=<n> escaped=<n> files=<n>` summary. It warns
+  (`PREGATE_TIMING_ASSERTION`); it does not block. See [timing](#timing).
+
 - `guards`: each guard in `.gstack/pregate.json` whose `when` globs match a
   touched file (renames included) runs its `command` in its own process, under
   the verified launch Bun, with its own `timeout_s` (default `--timeout`). A
@@ -109,8 +119,14 @@ Two stages with separate clocks, both printed:
   (static imports ∪ repo-path string literals ∪ the `bin/<name>` →
   `test/<name>*.test.ts` convention ∪ `dependencies`), transitively through
   non-test files; deleted and renamed files select the tests that named them.
-  A touched file with no lane is `FAIL lanes — <file> has no test lane`, never
-  a pass. Lanes and platform tiers come from `.github/workflows/*.yml`
+  A touched source file with no lane is `FAIL lanes — <file> has no test lane`,
+  never a pass. Markdown that no test depends on is a docs/no-tests empty lane
+  instead (`docs/no-tests: N documentation file(s)`), including when the base
+  branch has no `.gstack/pregate.json`. The dependency is the same import graph
+  as every other file, so a test that reads the Markdown (a fixture or a doc)
+  still selects that test. `empty_lanes` adds globs for other documentation;
+  it cannot clear a source file or a file under a test directory.
+  Lanes and platform tiers come from `.github/workflows/*.yml`
   (`gstack-pregate lanes` prints them): local ones run through the runner under
   `set -o pipefail`, judged on the runner's summary line (zero tests ran is a
   failure, a `| tail`-hidden exit is still an exit); a platform lane this
@@ -123,6 +139,14 @@ Two stages with separate clocks, both printed:
   first of `$BUN_INSTALL/bin` and `~/.bun/bin` whose Bun satisfies gstack's and
   the project's `engines.bun` (the row prints `runtime: bun <v> from <dir>`),
   so a Capy host's older image Bun cannot flip the verdict.
+- Every test-tier command (the lanes runner, each guard, the `--remote` gate)
+  runs supervised: see [supervision](#supervision). `--timeout` bounds each
+  runner process (the unit-file group, each serial file, each guard without
+  its own `timeout_s`), not their total; the stall timeout catches a hung or
+  silent one sooner.
+- Under 8 cores, a base-branch `remote_gate` or a remote `test_backend`
+  (`gstack-config set test_backend ubicloud`) records the local test tier as a
+  `requires-remote` obligation instead of running it: see [remote gate](#remote-gate).
 
 Every check records the input identity it ran against (the working-tree
 fingerprint before and after, the selection, the command hash); a tree that
@@ -142,6 +166,77 @@ Unknown flags exit 2 with usage on every verb (an agent told to run a flag this
 gstack lacks never gets a green it did not ask for). Tier 2 checks still to come
 (`ratchets`, `lint`, `links`, `hermetic`, `patches`, `integrator`) are named in
 `--only`'s help.
+
+<a id="supervision"></a>
+## Supervision: progress, stalls, deadlines
+
+GBRA-95 (gbrain, 4 cores): a core edit selected 3,683 local files, 358 of them
+serial; the test stage printed nothing for 90 minutes: each runner process
+ran up to its own `--timeout` (one per serial file) with its output buffered
+until it returned, and nothing noticed a process that had gone quiet. Now each
+test-tier command:
+
+- runs in its own process group (`setsid`), with stdout and stderr appended to
+  a log file, never a pipe, so a backgrounded grandchild that keeps the output
+  open cannot hold the check; after the command exits, the group's leftover
+  members are killed;
+- reports live on stderr (stdout stays the table, or one JSON document with
+  `--json`):
+  ```
+  PREGATE_TEST: <n>/<total> <file> start
+  PREGATE_TEST: <n>/<total> <file> pass|fail <seconds>
+  PREGATE_HEARTBEAT: <label> running <s>s; last file <file>; log <bytes> bytes, last growth <s>s ago (<log>)
+  PREGATE: tests <verdict> in <s>s — lanes: <detail>
+  ```
+  Per-file lines come from a progress adapter where the runner's reporter
+  provides them: `bun test` (its `<file>:` headers) is the only adapter today;
+  a one-file run (each serial file) reports its file from the launch for any
+  runner. Other runners (node --test, vitest, jest, pytest) get heartbeats
+  only. A heartbeat follows each 60 s with no progress line;
+- is killed as **stalled** when its log does not grow for the stall timeout
+  (`--stall-timeout <s>`, else `stall_timeout_s`, else 300; `0` disables): the
+  check is `incomplete` with `PREGATE_STALLED` and names the last file
+  started; the next serial file still runs;
+- is killed as **timed out** when that runner process reaches `--timeout`
+  (per runner process, so many serial files that each fit still pass); the
+  check is `incomplete` and the next serial file still runs.
+
+A kill is SIGTERM to the group, then SIGKILL after 5 s (a group that ignores
+SIGTERM still dies). SIGINT or SIGTERM to `gstack-pregate` itself SIGKILLs every
+running group, writes no `pregate.json` and exits 130 or 143. Windows has no
+process groups here: the kill is `taskkill /T /F` on the shell's tree, which
+misses a descendant that was reparented or started detached.
+
+<a id="remote-gate"></a>
+## Small machines and the remote gate
+
+Under 8 cores (`os.availableParallelism()`), when the base branch's
+`.gstack/pregate.json` declares `remote_gate` or `gstack-config get
+test_backend` is not `local`, the lanes check runs nothing locally: it records
+the selected local files as a `requires-remote` obligation with the command to
+run, `pregate.json/remote_gate` (the declared command) or
+`test_backend/<backend>` (gstack's `scripts/ubicloud/ubi-runner.sh run --src
+<repo> -- '<runner> <files>'`). Without either, the tier runs locally under
+the supervision above. Close the obligation one of two ways:
+
+- after running it, `gstack-pregate clear --remote pregate.json/remote_gate
+  --receipt <file>` with the gate's output, validated as `--remote` validates it
+  (a run URL is refused, `PREGATE_RECEIPT_INVALID` for a bad receipt), or
+  `gstack-pregate clear --remote test_backend/<backend> --run-url <url>`, which
+  has no machine-checkable receipt and is recorded as `attested:<url>`; or
+- `gstack-pregate --stage tests --remote --spend-cap <usd> --allow-repo-commands`,
+  which runs the declared `remote_gate` now (never under `--policy-from head`;
+  a `test_backend` without `remote_gate` cannot be run this way). The gate runs
+  in the repository root with `PREGATE_TREE` (the working-tree fingerprint
+  being tested), `PREGATE_FILES_FILE` (the selected files, one per line) and
+  `PREGATE_SPEND_CAP_USD`, and must print
+  `PREGATE_REMOTE: tree=<tree> tests=<n> failed=<n> [spent=<usd>]`, reporting the
+  tree it actually tested. The obligation clears only when that tree is
+  `PREGATE_TREE`, `tests` > 0, `failed` = 0 and the gate exits 0; anything else
+  leaves it uncleared and the check `incomplete`. The cap defaults to
+  `$GSTACK_SPEND_CAP_USD`; there is no default spend. Spend prints as
+  `spent, reserved, unknown`: a gate that prints no `spent=` is `unknown`,
+  counted at the cap.
 
 <a id="guards"></a>
 ## Guards and the lane-done rule
@@ -163,6 +258,54 @@ guard is a *command* with its own fix line. Older gstack refuses unknown keys
 (`PREGATE_CONFIG_INVALID`), so a repo commits `guards` only after the gstack
 that reads them ships. The worked gbrain configuration is in
 [gbrain worked configs](#gbrain-worked-configs).
+
+<a id="timing"></a>
+## Timing assertions
+
+`timing` reads only the lines the branch added or changed in test code (test
+files and files under `test/`, `tests/`, `spec/` or `__tests__/`; never
+fixture trees). It reports three patterns:
+
+| Pattern | Example |
+|---|---|
+| `wall-time-bound` | `expect(Date.now() - t0).toBeLessThan(400)`, `expect(elapsedMs).toBeLessThanOrEqual(2_000)`, `assert elapsed < 0.5` |
+| `cpu-time-bound` | `expect(cpuMs(() => parse(x))).toBeLessThan(150)`, `assert time.process_time() - c0 < 0.2` |
+| `sleep-then-assert` | `await Bun.sleep(50); expect(calls).toBe(1)` (a fixed sleep, not a polling loop) |
+
+A comparison with `0`, a named bound (`timeoutMs`, `TTL_MS`), a timestamp
+ordered against a bare `Date.now()` and a `while (… Date.now() < deadline)`
+poll are not reported. Changing the bound of an existing assertion is a changed
+line, so it is reported.
+
+**Escape.** When the bound is the contract (a hang check with wide headroom, a
+CPU-time bound on a pure function), put `gstack-timing-ok: <reason>` in a
+comment, in any comment syntax (`//`, `#`, `/* */`, `--`), on the line or
+the line above. The reason is required; an empty one is still reported with
+`(gstack-timing-ok needs a reason)`. `--explain` lists every escape and its
+reason.
+
+**Warn, not block (measured 2026-10-16).** The detector was run over:
+
+- gstack's own test tree: 263 hits in 123 of 1,566 test files (176
+  `wall-time-bound`, 87 `sleep-then-assert`), mostly real timing assertions,
+  most of them generous "does not hang" bounds.
+- gstack's last 51 commits on main: 9 of the 47 that touched tests would have
+  been flagged (29 hits; #3190 alone has 7).
+- gbrain's last 100 commits on master: 37 of the 95 that touched tests would
+  have been flagged (147 hits).
+- The five gbrain timing-flake fixes (#6050, #6493, #6726, #6746, #6862): 31 of
+  38 fix sites were flagged before the fix. The misses are flakes with no
+  timing comparison on the line (an injected deadline in #6050, a
+  `Promise.race` with a sleep and a deadline parameter in #6862) and ratio or
+  percentile checks computed far from the clock read. The correct fix in
+  #6726 (wall clock to thread CPU time) is still a bound and is reported 21
+  times.
+
+Blocking would stop about a fifth of gstack's and two fifths of gbrain's
+test-touching commits, including correct fixes, so the check warns. A repo
+that wants it stricter keeps the warning in its review rule (the /review
+checklist has the same rule) and /investigate's flake playbook says what to do
+with a timing flake: never raise the bound.
 
 <a id="sealed"></a>
 ## Sealed output: the pre-push hook and `gstack-pregate sealed`
@@ -339,14 +482,41 @@ held-out and transcript layout.
 ## `gstack-issue-links`
 
 ```
-gstack-issue-links [--base <ref>] [--issue <n>]... [--ci-run <id>]... [--out issues.json] [--json]
+gstack-issue-links [--base <ref>] [--issue <n>]... [--ci-run <id>]... [--supersedes <pr>]... [--credit <pr>]...
+                   [--no-auto-links] [--author <login>] [--repo <owner/repo>] [--out issues.json] [--json]
 ```
 
 Reads `origin/<base>..HEAD`. `Fixes #N` only on explicit closure intent: a
-`Fixes`/`Closes`/`Resolves #N` trailer line or `--issue N`. A bare mention, a
-partial fix, a deferred ask and every cross-repo `owner/repo#N` are `Refs`. Each
-closure issue is read through `gstack-issue-guard`; one that cannot be read is
-`Refs #N (unreadable …)` with `ISSUE_UNREADABLE` (exit 1), never `Fixes`. Each
-`--ci-run <id>` is searched among open issues whose body names it and rendered
-`Flake: #N (run <id>)`. The printed lines go under `## Issues` in the PR body;
-`--out` writes the object `gstack-ship-receipt write --issues @file` embeds.
+`Fixes`/`Closes`/`Resolves #N` trailer line or `--issue N`. A bare mention
+(a subject's `(#N)` included), a partial fix, a deferred ask and every
+cross-repo `owner/repo#N` are `Refs`. Same-repo references are printed as
+promotion candidates (`reference #N ← <commit line> (promote: fix #N)` on
+stderr, `candidates` in `--json`): the owner's `fix #N` reply reruns with
+`--issue N`; an unattended run keeps them `Refs` and lists them in the
+handoff. Each closure issue is read through `gstack-issue-guard`; one that
+cannot be read is `Refs #N (unreadable …)` with `ISSUE_UNREADABLE` (exit 1),
+never `Fixes`.
+
+Each `--ci-run <id>` is searched among open issues whose body names it and
+rendered `Flake: #N (run <id>)` only for a bot-opened issue of this repository
+that names that run (its `flake:json` `first_seen.run_id`, or this repository's
+`actions/runs/<id>` URL) and a test (`flake:json` `file › test`, or a
+`Flake: <test>` title). Two issues for the same test keep the lower number;
+every refused match is printed with its reason.
+
+Open PRs by other authors (not this branch, and not this PR's author: `--author`,
+else the `gh` viewer; when the viewer is an app such as `capy-ai[bot]`, the HEAD
+commit's GitHub user, else the owner of a user-owned repository, else the gap is
+`ISSUE_LOOKUP_FAILED`) whose closing
+set overlaps this PR's `Fixes` are `Related: #N (@author)`, read page by page
+from each issue's closing-PR references, in unattended runs too. `Supersedes #N`
+replaces that line and `Contributed by @author` is added (the credit lines of
+`lib/contributor-mode.ts`) only with `--supersedes N` / `--credit N`, after the
+owner confirms.
+`--no-auto-links` skips the lookup. A failed lookup prints `ISSUE_LOOKUP_FAILED`
+and keeps the other lines. The stderr preview names the source of each line.
+
+The printed lines go under `## Issues` in the PR body; `--out` writes the
+object (`fixes`, `refs`, `flakes`, `related`) `gstack-ship-receipt write
+--issues @file` embeds. With `--body`, that write refuses a body missing any of
+those lines (`ISSUE_LINKS_MISSING`).

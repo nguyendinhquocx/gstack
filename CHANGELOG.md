@@ -1,5 +1,195 @@
 # Changelog
 
+## [1.91.139.0] - 2026-10-18
+
+**The docs-sync fixture's declared Git interface now includes read-only `git describe`, so `ship-docsync-store` no longer goes red when the /document-release child checks for release tags.** PR #3272's gate run 39153452209 failed that case on one command, `git describe --tags --always`, which the observer did not list. A focused paid rerun of `ship-docsync-store` on this tree passed ($3.83); the child ran the same command twice and the observer accepted it.
+
+### Changed
+- **Accepted:** `git describe` with any of `--tags`, `--always`, `--abbrev=<n>` and `--exact-match`, plus at most one literal revision. The observer prose that parents pass to children lists the same forms, so the code allowlist and the prompt agree.
+- **Still refused:** `--dirty` and `--broken`, which take `index.lock` and rewrite `.git/index` (seen under strace on git 2.55), plus `--contains`, `--all`, any other flag, a second revision, redirection and composition. Write-capable Git commands such as `git tag` and `git update-index` stay outside the interface.
+- **Gate integrity:** this widens one observer allowlist (`test/helpers/docsync-observer.ts`) and tightens nothing. Free regressions cover all 36 Bash commands of the captured run and run each accepted form against a tagged fixture with an out-of-date file timestamp, checking that the repository and the raw index bytes don't change. Negative controls show that `git describe --dirty` really rewrites the index.
+
+## [1.91.138.0] - 2026-10-18
+
+**`scripts/gate-cost-replay.ts --history` replays PR gates' red runs and READY times, so the merge-train plan's two estimates are measured instead of assumed.** Over Oct 3 to 18 (505 E2E Evals runs, 92 merged PRs), the screen-provisional rule run on each failing head's diff from its tested base would have missed the PR-caused red on 2 of the 13 PRs that had one (#3036, #3121): 2 of 72 paid-relevant PRs (2.8%), against the plan's 6% estimate. 13 of 92 merged PRs had a PR-caused red, matching the plan's figure. Replaying READY arrivals through trains of 5 with a 3-hour fill limit, the realized train averages about 2.3 PRs, so trains make 22 to 29 gate attempts a week rather than the 12 to 20 the train model assumed, and READY-to-merge p90 runs 5 to 8 hours. This is lane T0 of the plan to cut the paid gate bill about 4x; nothing changes what any gate runs.
+
+### Added
+- **Red attribution as code.** Each failed case of a red PR-gate run is PR-caused or outside by GSTA-47's rule: a transcript diagnosis, red in another PR within 72 hours, the next gated run's own diff, or whether the push to it changed the case's inputs. It reproduces all 22 of GSTA-47's PR-caused runs and the same 13 PRs.
+- **The red-head replay.** Every PR-caused red case is checked against the screen-provisional rule on the failing head (not the merged squash), diffed from the base its run tested (the tested merge commit's first parent). The canary set is fixed in code before any replay (`SCREEN_CANARY_CASES`, one gate case per preamble-dependent surface) and is provisional until T2 lands. The report also lists misses with an empty canary set: here it made no difference, and 22 of the 28 red cases were caught only because the failing head changed a harness global, which makes the screen the full gate.
+- **The READY-arrival replay.** READY is approximated by the first time the merged own diff (modulo main merges and stamps) had green Free Tests and E2E Evals before the merge; READY reports are not machine-readable. Arrivals then run through the train policy (screened PRs first, unscreened in their own train once 5 wait, 45 minutes a gate and a bisect, the train model's red and rebuild rules), reporting occupancy, rebuilds and READY-to-merge p50/p90 beside today's (p50 0.1 h, p90 3.3 h).
+- Logic lives in `lib/gate-cost-history.ts`; the CLI reads runs, PRs and `report-verdict`/`trial-outcomes` artifacts read-only with `gh`, cached, and fetches old PR heads by SHA.
+
+### If you…
+- **…want current numbers:** run `bun run scripts/gate-cost-replay.ts --runs <full-gate run ids> --since <date> --until <date> --history`. A cold run downloads the full gates once (about 9 minutes); a cached rerun takes about a minute.
+
+## [1.91.137.0] - 2026-10-18
+
+**`scripts/gate-cost-replay.ts` measures what the paid PR gate costs, and what each selection or merge-train policy would have cost, from recorded artifacts and for free.** On the nine full gates of Oct 17 and 18 it reproduces GSTA-49's measurement: $93.14 recorded per gate, 97.1% of it Fable 5.1 (the model under test), 49.8% cache writes and 40.3% output. Over the 92 squash merges of Oct 3 to 18, today's selector averages $78.67 per merged PR on the $106.19 full-gate scale, R4's exercised-map shadow $64.27, and the screening rule $45.17 (screen-provisional). This is lane T0 of the plan to cut the paid gate bill about 4x; nothing changes what any gate runs.
+
+### Added
+- **`bun run scripts/gate-cost-replay.ts --runs <ids> [--since/--until | --prs] [--json]`.** It downloads the runs' `paid-slice-*` and `trial-outcomes` artifacts read-only with `gh` into `.context/gate-cost-cache` once, then prints recorded $ per gate by model and by token class (priced through `lib/pricing.ts`), a per-case mean cost table, and each merged PR's selection cost under today's selector, R4's shadow and the screening rule. A case whose runs record no cost (the PTY sessions) is estimated from its duration and marked estimated.
+- **Screening figures print as `screen-provisional`.** The rule's preamble detector is a line-commonality heuristic, not T2's hunk classifier, so the figures stay heuristic until T2 lands. A `package.json` change that only moves the version is neither selected nor a canary trigger, and all 24 judges always count.
+- **A seeded merge-train model.** Every merged PR lands in a train. PRs carry defects at the screened (6%) or unscreened (25%) rate, gates flake at 10% or 15%, each red pays a $6 bisect, a culprit is dropped and requeued, and an unattributed red gets one rebuild. It reports $ per week and per merged PR against $9,950 and $8,400 a week, plus screen spend, trains, gate attempts, bisects, rebuilds, stalls and red shares, for screening every PR, 80%, half, the cheapest or the most expensive half, or none. It uses CPython's Mersenne Twister, so seed 1 reproduces the measurement's sim.py exactly (trains of 5, 15% outside reds: $3,403, $2,672 and $1,986 a week for all, half and none).
+- Logic lives in `lib/gate-cost.ts`; the command is documented in docs/TESTING_INTERNALS.md#replay-gate-cost and CONTRIBUTING's "Which command do I run?".
+
+### If you…
+- **…want current numbers:** run `bun run scripts/gate-cost-replay.ts --runs <full-gate run ids> --since <date> --until <date>`. A shallow checkout tells you which `git fetch --shallow-since` to run first.
+
+## [1.91.136.0] - 2026-10-18
+
+**/cso release qualification counts a tested claim as false only when trusted evidence could have certified it.** In the second paid runtime qualification, the falsely-tested gate counted 33 claims. 12 of them were on the evaluator's own fixture instrumentation and 2 were on real incidental issues, which only the seeded repair verification could ever certify. Garry chose option 1.
+
+### Changed
+- **Tested claims on declared instrumentation count in neither direction.** A finding the evaluator marks `instrumentation` is never falsely tested and never certified, the same way precision leaves it out.
+- **A tested claim on an incidental finding needs a passing replay.** The evaluator replays the helper's signed repair bundle for that finding against the trusted source and records `trustedReplay`. Only `passed` with a 64-hex `replayEvidenceHash` certifies the claim. `failed` or `missing` (no bound bundle) leaves it falsely tested.
+- **Recall, repair, held-out repair, the v2 baseline and every threshold are unchanged.** Those still need the seeded issue and the judge's own held-out verification. Validation rejects `trustedReplay` on any judgment other than a claimed `incidental`, a malformed or reused hash, and unknown fields.
+
+### If you…
+- **…write an evaluator for `cso-eval.ts`:** write `trustedReplay` only on claimed `incidental` findings, with `result` `passed`, `failed` or `missing`, and `replayEvidenceHash` on `passed` only.
+
+## [1.91.135.0] - 2026-10-18
+
+**/cso evaluation cells that run a repair no longer fail on the helper's own file names.** In the second paid runtime qualification, one comprehensive Rails cell failed with REDACTION_FAILED. Once a repair ran, the helper retained dependency closures as `<finding id>-before-<plan hash>.json`. The producer's artifact inventory checks each path component, and this name didn't match any known helper-ID shape. So the secret redactor read the 64-character hex finding ID as a credential and failed the whole cell.
+
+### Fixed
+- **The eval producer recognizes dependency-closure file names.** `<64-hex finding id>-before|after-<16-hex>.json` is now a helper-ID shape, like run IDs and scanner-outcome names. Any other word in that position still goes through the redactor, and a test pins both cases.
+
+## [1.91.134.0] - 2026-10-18
+
+**The paid PR gate now starts only after a PR head's free tests pass and the PR has been quiet for 10 minutes, and a head whose own diff already passed the gate reuses that verdict instead of paying again.** Re-measured over Oct 3 to 17 (505 runs, $21,449) with GSTA-47's scripts: the readiness wait alone would have saved $2,986 (about $1,380 a week), and verdict reuse up to $601 more (restamp-only $97, main moved $504). Together that is up to $3,587, about $1,660 a week; how much of the main-moved share survives the selection check is between $146 and $390 of the $601 by approximation. The same heads still get the same selection and verdict rules; only the start time moves. The PR receipt store, which never restored once, now does.
+
+### Changed
+- **Readiness-gated dispatch (R1).** The `readiness` job in `evals.yml` replaces the 90-second push-burst debounce. It sleeps out the quiet window (repository variable `EVALS_QUIET_MINUTES`, default 10; `evals-no-debounce` sets it to 0), then waits for Free Tests to pass on the same head SHA, for up to 80 minutes. Free Tests red on the head fails the run with no paid work. A newer push still cancels the run. Dispatches never wait, and Version Gate is not an input, so a stamp push always gets its gate.
+- **The receipt store restores.** `slices-report` now runs on a GitHub-hosted runner like `recover-receipts`. On Ubicloud its `actions/cache` save went to Ubicloud's transparent cache, which the GitHub-hosted restore never sees: GitHub's cache held no `eval-input` entry at all, and #3253's restamp gate restored nothing 3 minutes after its green run saved 56 receipts.
+
+### Added
+- **Paid-gate verdict reuse (R2a restamp-only, R2 main moved), a gate edit.** A PR head reuses the newest executed gate's GREEN verdict only when every newer run of the PR provably ran no paid slice, the gate had reconcile exit 0 and no manually accepted case, this head's own plan has the same selection fingerprint, and either (R2a) the base is unchanged and the tree receipt prints `TREE: same-modulo-stamps` with only VERSION, package.json, CHANGELOG.md or the agents digest differing, or (R2) main moved and the PR's own diff from its merge-base, stamp files excluded, is byte-identical. Base-ref code proposes the reuse (`scripts/gate-reuse.ts find`), the planner confirms the selection, no slice runs, and the PR comment says `PASS (reused: restamp-only, R2a)` or `PASS (reused: main moved, R2)` with the reused run, its head, why, and the receipt digest or own-diff signature. Free Tests and every other check still run on the new head. Anything else (a changed own diff, a non-stamp byte, a newer red or partial run, a missing binding, receipt or merge-base, `evals-fresh`) runs the full gate.
+
+### Fixed
+- **The tree receipt no longer drops diff lines that start with `--` or `++`.** Its unified-diff parser treated `---`/`+++` inside a hunk as file headers, so a release-output line beginning `++` or `--` could pass as a stamp. It now reads headers only before a file's first hunk, and a file mode change is never a stamp.
+- **`autoplan-guard-pty` no longer stalls at the phase boundary.** Its scripted actor (haiku) published Phase 1, printed "Phase 1 complete." and ended its turn, so the case idled to its 480 s deadline with 2 of 4 guarded allows. This is the 489 s red seen on #3190, #3258, #3260 and this PR's stamped gate (run 39099195754). The script now runs steps 1 to 11 in one continuous run, and says the Phase 1 line is a boundary, not the end. The publication and the Phase 2 entry stay in separate messages. The case also stops waiting as soon as the actor ends its turn there, and names the cause `PHASE_BOUNDARY_STOP`.
+
+### If you…
+- **…want a restamp to reuse its gate:** put the CHANGELOG entry in the gated push (under `## [Unreleased]` or the tentative version), so the stamp only re-heads it.
+- **…want a main merge to reuse its gate:** merge or rebase without touching the PR's own files; if main changed a file your PR also changes, the full gate runs.
+- **…see "Free Tests run N concluded failure" on E2E Evals:** fix and push, or re-run Free Tests and then re-run E2E Evals.
+
+## [1.91.133.0] - 2026-10-18
+
+**A lane on a small machine no longer reports done while its pregate test tier still waits on a remote run.** The coordinator contract every lane inherits (autoplan reviewer prompts, `gstack-autoplan contract`, /spec's gate-and-file section) now says a lane is done only when `gstack-pregate run --allow-repo-commands` passes, and that a `requires-remote` obligation needs `--stage tests --remote --spend-cap <cap>`.
+
+### Changed
+- **Coordinator contract, "Before done":** `requires-remote` is unfinished, and the step names the `--remote` command that clears it. The WIP-push and sealed-guard rules are unchanged.
+
+## [1.91.132.0] - 2026-10-18
+
+**On a machine under 8 cores, `gstack-pregate` clears its test tier on one Ubicloud VM in about 7 minutes for about $0.06, instead of running locally for an hour.** gstack's own `.gstack/pregate.json` now declares a remote gate, so a small machine records the local test tier as a `requires-remote` obligation and `gstack-pregate --stage tests --remote --spend-cap 2 --timeout 2700 --allow-repo-commands` clears it. All 1,280 free test files ran in 404 s (create 24 s, setup 72 s, tests 250 s) for $0.06; the same 798-file selection took 3,550 s locally on 4 cores. `gstack-next-version` also fetches open PRs' VERSION claims in parallel (8 PRs: 4,160 ms before, about 0.5 s now) and says so when it could not read one.
+
+### Added
+- **`scripts/ubicloud/pregate-remote.sh`, gstack's remote gate.** With `UBICLOUD_API_KEY` it runs the selected files on one VM with `bun run test:ubicloud`'s environment, checks the tree and the planned file set on the VM before any test runs, and reports `PREGATE_REMOTE: tree=… tests=… failed=… spent=…` from billed minutes. Without a key it runs the same files locally in parallel shards and prints `backend=local (N cores; not the CI environment)`.
+  - The spend cap buys the wall time at the size's list price (at most 45 minutes); a cap that cannot buy 20 minutes refuses before any VM exists.
+  - It finishes before pregate's own `--timeout`: 120 s are reserved for teardown, and a deadline too short to be useful refuses up front.
+  - At create time it prints the VM name and the exact `bash scripts/ubicloud/ubi-runner.sh down <name>` line.
+  - Paid test files in a selection are named and left to the paid PR gate; a paid-only selection reports `tests=0`, which never clears.
+  - Every refusal starts with a `PREGATE_REMOTE_*` reason code; the table is in docs/pregate.md#remote-gate.
+- **`test-free-shards.ts --files-from <path>`** plans exactly the listed files. Unknown paths, an empty list and malformed or repeated lines are rejected before planning.
+
+### Changed
+- **`gstack-next-version` fetches claims concurrently** (up to 10, 15 s each) and sorts its output by PR number. A fetch that times out or fails is listed in `unknown_claims`, the JSON says `complete: false`, and the pick is marked provisional on stdout and stderr. The fork/path hint appears only for HTTP 404.
+- **`gstack-restamp` in claim-at-open mode reports an incomplete claim queue as `claims: incomplete`**, naming the unknown PRs, instead of `read`.
+
+### If you…
+- **…run `gstack-pregate` on a machine under 8 cores in this repo:** clear the test tier with `gstack-pregate --stage tests --remote --spend-cap 2 --timeout 2700 --allow-repo-commands`. Keyless works too but is practical only for small selections (98 files took 103 s on 4 cores).
+- **…see `complete: false` from `gstack-next-version`:** rerun it before stamping; the slot may collide.
+
+## [1.91.131.0] - 2026-10-18
+
+**`gstack-pregate` finds the tests for Python files, and a missing `node_modules` no longer reads as "stale generated files".** In a Python repo, the `lanes` check failed almost every touched `.py` file with `PREGATE_NO_LANE`, because the import graph only parsed JavaScript and TypeScript. In a FastAPI service with about 1,500 non-test modules, Scott Gigante's change (#3201) cut the unmapped count from 1,473 to 780, and most of the rest are migrations and scripts no import reaches. Separately, a fresh checkout without `node_modules` made the pre-gate report `REGEN_STALE` and suggest rerunning the generator, which sent people the wrong way.
+
+### Added
+- **Python import edges in `lanes`** (thanks @scottgigante-hubflow, #3201). `import a.b`, `from a.b import c`, parenthesised lists and relative `from . import x` resolve from the repository root to `a/b.py` or `a/b/__init__.py`, plus the package `__init__.py` files Python runs on the way in. Stdlib and site-packages imports add nothing. In test files, a dotted `mock.patch` target such as `'pkg.mod.Class.method'` maps to its module.
+- **`REGEN_DEPS_MISSING`.** When a regen command exits 0 with different outputs, `package.json` declares dependencies and `node_modules` is missing, `gstack-regen check` and the pre-gate say "dependencies missing (no node_modules); run bun install, then rerun the check" instead of `REGEN_STALE`. The install command follows the lockfile. The pre-gate check is `incomplete`, never `pass`.
+
+### Fixed
+- **The Python scanner stays linear on hostile input and does not drop tests.** Review found several problems before landing, all fixed:
+  - Long runs of dots or spaces after `from` no longer backtrack quadratically.
+  - Deep dotted names stay linear, and real deep modules still map.
+  - An escaped triple quote no longer swallows the imports after it.
+  - A literal that names a repo file still gets its `mock.patch` reading.
+  - A package and a same-named module both map.
+  - Imports after `;` or `:` count.
+
+### If you…
+- **…run `gstack-pregate` in a Python repo:** touched modules now select the pytest files that import them. `conftest.py`, `src/` layouts and `importlib` calls still need `.gstack/pregate.json` `dependencies` declarations.
+- **…see `REGEN_DEPS_MISSING`:** run the printed install command, then rerun the check.
+
+## [1.91.130.0] - 2026-10-18
+
+**Every PR plan now shows what a tighter, exercised-path case map would run, without changing what actually runs.** Today a change to a bin or lib file reaches almost every gate case, because selection follows every mention of the file. The exercised-path map counts only what a case really executes: its touchfiles, its test's imports, the shell its skill runs, and the bins its recorded trials invoked. It runs in shadow mode. Replayed over every PR run that had a gate red between 2026-10-07 and 2026-10-17 (37 runs, 47 failed gate cases), it keeps all 47: `bun run test:exercised-map --replay`.
+
+### Added
+- **A shadow line in each PR plan's coverage summary.** It names the gate cases the map would select, drop and add, with per-file provenance and a predicted saving. The saving is a lower bound, because about 39% of observed case runs (the PTY trials) have no known cost.
+- **`bun run test:health` reports the shadow saving and shadow misses per week.** A red on a case the shadow would drop counts as a miss unless the case passed later at the same head SHA, which lists it as a flaky drop.
+- **MAP_GAP lines in the paid report.** A command a case ran outside its map is printed as `MAP_GAP <case> <bin>`, marked non-blocking for this PR, and widens the map at the next refresh. It never affects a verdict.
+- **`bun run test:exercised-map`** refreshes the committed map (`test/helpers/exercised-commands.json`) from a census run (`--from-run <id>`) or from local artifacts (`--from-dir`). Refreshes only add commands. Unavailable or partial input writes nothing and exits with a stable code: 2 usage, 3 unavailable, 4 incomplete.
+
+### For contributors
+- The weekly census unions its own recorded commands into the map and uploads it as `exercised-map-a<attempt>`.
+- A PR that changes only the map selects no paid case while the map is in shadow mode.
+- docs/TESTING_INTERNALS.md#exercised-path-map documents the edge classes, the refresh contract and the activation bar.
+
+## [1.91.129.0] - 2026-10-18
+
+**PR paid-lane selection reads every script it depends on, and fails closed when it can't.** Selection derives which paid cases a changed file reaches by scanning imports. It skipped extensionless `bun`/`node` scripts, read 15 `.ts` files with the TSX loader, and treated a scan error as "no consumers", which under-selects. Across all 2,223 code files in the repo, scans now finish with 0 errors, and no (file, case) pair that main selected is lost.
+
+### Fixed
+- **Shebang scripts and `.ts` files are scanned correctly.** A leading `#!` line is stripped before scanning, extensionless `bun`/`node` scripts count as code, and the loader is chosen by file extension. 41 files that reached no paid case now reach the cases that use them.
+- **A failed import scan restores the full gate** with the label `import scan failed` and the file to fix, instead of silently selecting nothing.
+- **Repository config no longer looks like an unknown dependency.** `.gstack/ship-policy.example.json`, `.github/dependabot.yml`, `.osv-scanner.toml`, `setup.ps1`, `.gitlab-ci.yml` and `.github/ISSUE_TEMPLATE/**` are audited free-only files; `capy/` paths are derived like other source; a full-gate file is labelled `full-gate input`.
+
+### Added
+- **`bun run test:health` reports cost per merged PR first**, plus gate cases per PR run and known cost per PR run, split by selection mode.
+
+### For contributors
+- The selection replay (`scripts/replay-pr-selection.ts`) honours the same free-only exemptions as the selector when it counts misses.
+- docs/TESTING_INTERNALS.md#pr-paid-lane-fallback describes the fallback classes as they now behave, and records why the lockfile stays a full-gate input.
+
+## [1.91.128.0] - 2026-10-18
+
+**The two free-suite duration seeds now refresh themselves weekly.** The shard packers read a Linux and a Windows duration seed, and both went stale as test files came and went. They were refreshed by hand twice this week. A new weekly workflow records both seeds and opens one seed-refresh PR when either seed's file set changes. That PR goes through the normal review.
+
+### Added
+- **`free-durations-record.yml`** runs Mondays at 04:00 UTC, before test-health, and on dispatch. It records the Linux seed on `ubicloud-standard-8`, the free-suite shard runner, and the Windows seed through `windows-free-tests.yml`'s `record_durations` path (now also callable with `workflow_call`). When either seed adds or drops a file, it opens or refreshes one PR on `bot/free-duration-seeds` and runs the free lanes on it. The PR body states the seed-ratchet result and names every file that failed while recording.
+- **Guards:** the bot never edits `scripts/free-test-seed-allowlist.json`. While the open seed PR holds any commit besides the bot's own refresh, later runs leave it alone. Only runs on `main` publish, and `open_pr=false` records and reports only. An interrupted recording, or more than 5 red files on either OS, proposes nothing.
+
+### Fixed
+- **An interrupted manual Windows recording no longer uploads the unchanged committed seed** under the Windows seed name.
+
+## [1.91.127.0] - 2026-10-17
+
+**The paid PR gate stops failing on its own fixtures.** A 132-verdict PR gate was fully green only about a quarter of the time. Every red verdict since #3231 was diagnosed from its transcript and replayed through the real detector. This release fixes the remaining causes where they start: fixture actors that broke the production protocol, detectors that misread a correct run, and skill prompts that left the agent guessing. No threshold, trial count, case kind or quarantine changed.
+
+### Fixed
+- **The State Machines specialist runs when its detector fails.** The /review and /ship scope block now runs `gstack-state-matrix detect` itself and uses its output only on exit 0. A failure prints `SCOPE_STATE_MACHINE=unknown` with the detector's stderr, and unknown dispatches the specialist. Its output reaches `gstack-state-matrix check` as a file the agent writes, never as text in a shell command.
+- **Consent options are lettered B, C and D when Aside is absent**, matching the question's answer keys.
+- **Plan-reality tier 1 rows are never n/a.** A run no longer loops repairing `deferred-asks n/a` past its deadline.
+- **/qa's exploratory stop rule needs one probe per documented input rule of each field.** Each probe breaks only its rule and satisfies every other, so a value that breaks two rules covers neither. Rules left uncovered at the probe or time cap go to limits. After a fix, every earlier capture is superseded: rerun each one the verdict relies on, or report it as open.
+- **`gstack-docs-candidate snapshot --help` and `compare --help` exit 0** before any side effect, and a compare reject names the path, each bad field and a fix that never re-snapshots over the pre-audit baseline.
+- **The docsync fault actor uses the production candidate protocol.** It writes candidates through the installed snapshot, and a failed snapshot reports a stable reason with one retry under a fresh audit id.
+- **The required-probe reminder counts only captures after the last source edit** when the caller declares `GSTACK_QA_REQUIRED_AFTER_EDIT`. Pre-repair captures no longer look like post-repair coverage. Without the declaration nothing changes.
+- **Webhook fix evals reserve the post-repair reruns first** inside the unchanged 12-capture ceiling.
+- **The autoplan guard eval's actor waits for the reviewer.** It ends its turn after a background dispatch and reads the close packet only after the reviewer finishes; before, the haiku actor sometimes read it early and failed the case on ordering alone.
+- **The shim-dom scan check resolves the command's own `_REPORT`/`_RUN`**, so a correct scan is no longer a red.
+- **PTY failure dumps show the last non-blank screen**, and visible text no longer carries cursor show/hide escapes.
+- **Windows budgets:** the nested review-army and answer-invalidation tests get explicit 30-45 s timeouts instead of Bun's 5 s default.
+
+### Changed
+- **HARNESS_VERSION is 5.** The PTY `stripAnsi` change can change pattern matches, so every case starts a new pass-rate series.
+- **The qa-callers fixture prompt binds paths instead of teaching helper syntax**, and points to the QA section for every form.
+
+### If you…
+- **…write a caller for `gstack-qa-evidence`:** set `GSTACK_QA_REQUIRED_AFTER_EDIT={"paths":[absolute paths],"since":ISO}` when your required probes must run after a repair.
+
 ## [1.91.126.0] - 2026-10-17
 
 **Artifacts sync stops saying "ok" when two project folders differ only by letter case.** When the artifacts repo tracks two spellings of one project, such as `projects/MyApp/` and `projects/myapp/`, a Mac or Windows disk stores them as one file. Git there staged each write under the other spelling and the sync reported `ok`. One spelling then stayed modified forever, and other machines read the wrong bucket (#3220). This lands the detector from Kkkkkuro's #3223 and #3245, with credit, and holds those files instead of halting the whole sync.

@@ -2368,6 +2368,12 @@ working-tree file silently.
 branch's own file deliberately, pass `--policy-from head --allow-repo-commands`;
 the receipt then says `policy: head (unreviewed)`.
 
+`--base` names a branch on `origin`. A commit SHA, a tag or another remote's
+ref (`upstream/main` in a fork clone) never resolves as `origin/<base>`, and
+fetching it cannot create that ref, so pass a branch that exists on `origin`
+(`git branch -r --list 'origin/*'` lists them). `gstack-pregate` says so in
+its fix instead of suggesting the fetch.
+
 <a id="policy-invalid"></a>
 ### `POLICY_INVALID`
 
@@ -2850,17 +2856,25 @@ and Heavy-only files included.
 
 **Meaning.** A touched source file maps to no test through static imports,
 repo-path string literals, the `bin/<name>` → `test/<name>*.test.ts` convention
-or a `dependencies` declaration. That is a failure, not a pass. Markdown no
+or a `dependencies` declaration (in a Django project, also the files Django
+loads by name: settings strings, `include()`, app migrations, admin, templates
+and static files). That is a failure, not a pass. Markdown no
 test depends on is a docs/no-tests empty lane and is not this error, whether
 or not the name says plan, evidence or redproof. A test that reads one of
 those files (a quoted path or a `join()` of path segments) still selects that
 test. An unmapped source or code file still fails. A file under a test
-directory is not this empty lane.
+directory is not this empty lane. Images, fonts and media, and
+allowlisted tool config no test names, are the assets-and-tool-config empty lane,
+not this error.
 
 **Fix.** Add a test that names the file, or declare its lane (an explicit `[]`
 for files with no behaviour) under `dependencies` in `.gstack/pregate.json`.
 Other non-Markdown documentation goes in `empty_lanes` on the base branch.
-`--explain` prints every mapping and why. For a file with no lane it also prints the import
+Dart files under `integration_test/` or `test_driver/` need a device, so pregate
+never runs them: declare `"**/integration_test/**": []` (and
+`"**/test_driver/**": []`) under `dependencies` and let CI run them.
+With no policy yet, `gstack-pregate init` drafts the `dependencies` entries
+from the repo and lists the files it could not place. `--explain` prints every mapping and why. For a file with no lane it also prints the import
 specifiers in test files that resolved to no repo file (for example a
 `tsconfig.json` `paths` alias such as `@/lib/x` whose target is missing) and any
 `extends` hop that was not followed (only relative `extends`, at most 4 hops). If
@@ -2883,8 +2897,10 @@ should have found it, report the specifier as a resolver gap.
 allowed, or the working tree changed while the check ran. Incomplete is never
 pass and blocks publication.
 
-**Fix.** Pass `--allow-repo-commands`, install the tool, raise `--timeout`, or
-keep the tree still, then rerun.
+**Fix.** Pass `--allow-repo-commands`, install the tool (for a Dart package the
+message names `not on PATH: dart` or `flutter`; fvm also works when the repo pins
+it), commit the `pubspec.yaml` of a Dart package the message says has none (or
+declare `runner`), raise `--timeout`, or keep the tree still, then rerun.
 
 <a id="pregate-stalled"></a>
 ### `PREGATE_STALLED`

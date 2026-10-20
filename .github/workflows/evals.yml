@@ -4,6 +4,7 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# A dispatched screen is keyed on its PR, so a newer head's screen cancels the older one.
 concurrency:
   group: evals-${{ github.head_ref }}
   cancel-in-progress: true

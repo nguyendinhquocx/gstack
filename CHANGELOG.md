@@ -1,5 +1,73 @@
 # Changelog
 
+## [1.91.185.0] - 2026-10-23
+
+**Three flaky paid eval cases get repairs: three harness gaps closed and one fixture rule moved to where the agent reads it.** Today's daily flaky-fix pass took the two repeat flakes and one periodic timeout from the flaky ledger. plan-design-with-ui-scope failed its first attempt in train gate 39852003387 (its fourth flake) because the Opus 5.5 agent rated the plan "4/10 on design" in plain words and the focus check wanted the words "design completeness". ship-docsync-completion failed in train gate 39904966815 and in GSTA-63's focused run with the same slip both times: the agent added `gstack-docs-candidate --help` to the end of its first line of reads, which the fixture interface forbids. plan-design-finding-floor timed out at 610 s in periodic run 39209106033 because nothing answered the owned plan-file Create menu after its title scrolled off screen; two focused trials then showed a second stall, at the Step 0D focus menu the floor actor answers only when it matches one captured wording.
+
+### Fixed
+- **`test/skill-e2e-plan-design-with-ui.test.ts`**: the Step 0A rating the focus check looks for is now any sentence that scores the plan's design out of 10, so "I rated this plan 4/10 on design." counts like "4/10 on design completeness". The check still needs a question that names the focus and an option that leads with all seven areas, and a rating split from the word "design" across sentences, an unscored design sentence, and a non-design score are still refused.
+- **`test/helpers/docsync-interface.ts`**: the declared observation interface now states the own-call rule in the sentence that introduces the Preamble block, lifecycle helpers and `gstack-docs-candidate` commands ("each as its own Bash call, with nothing joined before or after it ... a --help is no exception"), instead of in a later sentence after the read grammar. The grammar is unchanged and the captured joined line is still refused.
+- **`test/helpers/plan-count-file-permission.ts`**: a cropped owned Create menu whose preview starts on the native rule (the "Create file" title and file row scrolled away) now binds to its pending Write, as a cropped Edit menu already did. Every preview row must still match the owned Write's content, and the prompt must still name the owned file.
+- **`test/fixtures/design-floor-focus-picker.ts`**: the floor actor's Step 0D answer moves out of the shared PTY harness into the case's own fixture, and `runPlanSkillFloorCheck` takes it through a new optional `pickSetupChoice` hook that only plan-design-finding-floor passes. The answer (`pickDesignFocusAll`, the seed's declared "review all seven dimensions") identifies the focus menu by its structure: a title or question about the focus, exactly one option that is all seven dimensions, passes or areas, every other option narrowing ("Only …", "Focus …" or "… only"), and a Project/branch/task line naming PLAN.md or the seeded plan. It used to need the exact title "Review all 7 design dimensions, or focus?", a source line reading "plan-design-review of PLAN.md" and an ELI10 that began with the rating, so the template's own 0D sentence ("I've rated this plan 2/10 on design completeness. … Want me to focus on specific areas instead?") and a menu titled "Review focus for the landing page plan" both sat unanswered until the 610 s timeout. A second question, a quoted or foreign plan, a non-narrowing alternative, two all-seven options and a bundled approval still get no answer.
+
+### Tests
+- `test/plan-design-with-ui-fixture.test.ts` replays gate 39852003387's four native questions (`test/fixtures/design-ui-focus-capture-39852003387.json`) as a pass, and the same capture without its focus question as a failure. New controls: a rating and the word "design" in different sentences, and an unscored design sentence.
+- `test/docsync-command-grammar.test.ts` checks that the captured joined line stays refused, that the candidate's `--help` alone is accepted, and that the sentence naming the candidate commands carries the own-call rule.
+- `test/plan-create-prepublication.test.ts` replays the periodic run's final viewport (`test/fixtures/plan-design-floor-create-rule-crop.json`): it is granted once and fails without the fix. Controls: two rules, text above the rule, a quoted row, a changed row and a foreign file name are refused.
+- `test/plan-design-floor-fixture.test.ts` (the case's owner test; the rows moved with the picker from the boundaries unit test) replays both pending focus menus from the focused trials (`test/fixtures/design-floor-focus-template-0d.json`, `test/fixtures/design-floor-focus-review-focus.json`); each selects the all-seven option, and the template-worded one failed before the change. New controls: a question not about focus, a foreign or quoted plan, an alternative that does not narrow, and a second question.
+
+### Gate integrity
+- No threshold, budget, timeout, trial count or case kind changed. Two accepted-input changes to review: the plan-design focus rating accepts "design" without "completeness", and the floor actor answers the 0D focus menu without requiring a rating sentence or one exact title (it answers only with the seed's declared all-seven option).
+- HARNESS_VERSION stays 6. `boundaries.ts`, `claude-pty-runner.ts` and `runners/floor.ts` are recorded non-behavioral: the picker left the shared harness and the new hook has one caller, so no other case's input or verdict can change, while plan-design-finding-floor's owned bytes (its test file and the new fixture) start that case's own pass-rate series.
+
+## [1.91.184.0] - 2026-10-23
+
+**The office-hours attempt lifecycle test no longer races the wall clock.** Today's daily flaky-fix pass: in #3341's remote pregate, "recommendation near-success stays inside the shared work deadline" failed once with two judge starts where it expects one, then passed on the serial retry. Its fake runner and judge used real sleeps (220 ms plus 10 ms) against a mocked 300 ms deadline, so a loaded machine could push the first attempt past it. The sibling late-judge case had the same exposure from the other side.
+
+### Tests
+- **`test/office-hours-attempt.test.ts`**: the plan-format lifecycle subprocess now runs on Bun's fake timers, and the fake runner and judge advance them by their scenario durations instead of sleeping. The helper's own deadline (`Date.now()` and its `setTimeout`) moves only when the fixture says so, so near-success always finishes at 230 ms of 300 and late-judge always crosses the deadline, whatever the machine's load. With a 400 ms real stall injected into the fake runner, near-success and late-judge failed before the change and pass after it. The whole file passed 20/20 runs unloaded and 20/20 under 8 busy loops on 4 cores.
+
+### Gate integrity
+- No product code, budget, timeout, threshold or assertion changed: the mocked 300 ms capture budget, the 50 ms drain grace and the scenario durations are the same.
+
+## [1.91.183.0] - 2026-10-23
+
+**A rejected API key no longer turns a gate into 131 assertion reds and 131 reruns.** Train gate run 39696775546 ran with a rejected `ANTHROPIC_API_KEY`. Every case failed on a 401 before the model ran, and the report counted them as assertion failures. Rule 16 then reran all 131 cases with the same key. A trial whose provider rejected the run's credentials is now INFRA: the gate never reruns it, the verdict counts it under INFRA, and its failure line reads `credentials rejected: Invalid API key · …`. A real assertion failure that only mentions a key keeps its class and is still rerun.
+
+### Fixed
+- **`test/helpers/eval-store.ts`**: `credentialRejection()` finds the evidence in a trial's API-error sessions or its failure text: Anthropic's 401 `authentication_error` body, the CLI's `authentication_failed` code or `Invalid API key ·` message, or OpenAI's `invalid_api_key` code. Both record builders use it. The JUnit census (`scripts/lib/paid-report.ts`, which feeds the rerun plan) and `classifyTrialShard` (trial panels) mark such a trial `infra`. Contract evidence still wins.
+- **Session ledger**: the claude -p and Agent SDK observer (`SessionObserver`) ends a session as `api_error` on the CLI's synthetic `Invalid API key` message, not just on `API Error:` lines. Both PTY ledger writers (`screenPanelEnd` in `test/helpers/pty/screen.ts`) record the rejection line wherever it is on screen, because after one the CLI sits at a plan-mode or manual-mode footer that the idle check doesn't recognize. Before this, `autoplan-guard-pty` recorded `completed` with no evidence.
+- **Report headline**: the INFRA count includes rule cases with an INFRA-class failure, not only trial panels.
+- **Gate integrity (a gate edit):** a credential rejection was already a red, and it is still a red. Only its class changes, from assertion to INFRA, so rule 16 no longer reruns it. No case's pass or fail changes. No threshold, trial count, case kind, judge model, `EVAL_POLICY` constant or `HARNESS_VERSION` changed; the edit is recorded as non-behavioral in `scripts/harness-version.json`. Known gap: local `--case` diagnosis and the train bisect's file-mode trials still classify by shard status.
+
+### For contributors
+- **`test/credential-rejection.test.ts`** replays trimmed captures from run 39696775546 (`test/fixtures/credential-rejection-39696775546.json`) through each runner's evidence path and the real `--report` and `--rerun-plan` CLI paths. Negative controls cover assertion failures that mention a key, an API key or an auth word, and a non-credential API error.
+
+## [1.91.182.0] - 2026-10-23
+
+**gstack installs on a project that pins Bun 1.4.4 again.** gbrain master moved its CI to Bun 1.4.4 (gbrain #7374, the Brotli CVE-2026-111497 fix), and gstack's Capy installer then stopped every gbrain session with `RUNTIME_PIN_CONFLICT` ("verified archives: 1.4.2 1.4.3 … pins exactly 1.4.4"), because it installs only Bun archives whose SHA-256 it carries. It now carries 1.4.4, so the same run installs the pinned Bun and ends `gstack: ok`.
+
+### Fixed
+- **`bin/gstack-bun-version.sh`**: `GSTACK_BUN_VERIFIED` is now 1.4.2 1.4.3 1.4.4, with 1.4.4's checksums for linux-x64, linux-x64-baseline and linux-aarch64, the targets 1.4.3 covers. They come from the release's `SHASUMS256.txt.asc`, whose clearsigned signature verifies against Bun's release key F3DCC08A8572C0749B3E18888EAB4D40A7B22B59 (Robobun, the key oven-sh/bun's own Dockerfiles assert), and each archive was downloaded and hashed to the same value. The 1.4.2 and 1.4.3 entries are unchanged and verify the same way. gstack's own minimum (1.4.2), install default (1.4.3) and CI pins do not move.
+- **`test/gstack-capy-install.test.ts`**: a gbrain-like repo whose CI pins only 1.4.4 refuses `~/.bun` 1.4.3 and installs the 1.4.4 archive. **`test/bun-version-drift.test.ts`**: every verified version must carry a checksum for each installer target. The existing "verified archives" text assertions list 1.4.4.
+
+## [1.91.181.0] - 2026-10-23
+
+**/cso can run its contained runtime checks.** Before this release the runtime catalog qualified nothing, so /cso always fell back to static assessment. It now qualifies ten pinned images: Node 24.4.0, Bun 1.3.10, Python 3.13.4 with uv 0.8.0, Rails on Ruby 3.4.4, and PostgreSQL 17.2, each for linux/amd64 and linux/arm64. With Docker installed, comprehensive /cso boots the target app inside the matching image and tests findings and repairs against it. The images passed the private evaluator's release qualification (run-5 statements, re-delivered under Garry's approval). The ingress then checked them in qualify run 39674065531 at 514fbfd.
+
+### Added
+- **`lib/cso/runtime-catalog.json`** is now catalog `cso-v3-39674065531-133cb360842d`, which replaces `cso-v3-build-reviewed-2026-09-10`. Promote run 39841502986 generated it from qualification run 39674065531's authenticated statements and attested it. GitHub Actions committed the attested bytes (`sha256:078e0bf6…`). Each runtime's image is pinned to a public `ghcr.io/garrytan/gstack/cso-staging/…@sha256` digest, and each entry records its source commit (133cb36), SBOM and provenance digests, and requalification triggers (`preparationSha256` `c721b585…`).
+
+### For contributors
+- **The /cso free tests no longer assume the committed runtime catalog is empty.** Six tests pinned `runtimes: []` and broke as soon as a promotion landed. Tests that need an unqualified catalog now build one with `unqualifiedRuntimeCatalog()`. The replay tests expect whichever fail-closed rejection the committed catalog produces, so the suite passes with the catalog both before and after a promotion.
+
+## [1.91.180.0] - 2026-10-22
+
+**The /cso docs say what the qualified catalogs now allow.** AGENTS.md, the README and `docs/cso-release-qualification.md` still said that no qualified runtime or scanner image existed, so /cso ran static assessment only. The scanner catalog has been qualified since #3042. The runtime catalog becomes qualified with the runtime promotion PR that ships alongside this one.
+
+### Changed
+- **AGENTS.md**, **README.md** and **`docs/cso-release-qualification.md`**: the /cso entries name the ten qualified runtime images and the twelve scanner images, and say when /cso still falls back to static assessment: without Docker, or where no profile matches.
+
 ## [1.91.179.0] - 2026-10-22
 
 **docsync-fault-interface fits its budgets under load again.** On 2026-10-18 it timed out under load on a Ubicloud full run. Its nested 36-case suite spent most of its time starting processes: each fault actor spawn loaded about 36 ms of imports (an empty bun takes 5.5 ms), inspect repeated Git reads, and the whole nested run sat under one 120 s outer test. With real Git on 4 cores, inner cases now take a 0.70 s median (max 1.25 s) unloaded, against 1.07 s before. Under 8 busy loops the max is 3.44 s, inside bun's default 5 s; before, cases reached 4.45 s. The worst outer test went from about 100 s of its 120 s cap to 33 s. No timeout, budget, retry, assertion or case changed.

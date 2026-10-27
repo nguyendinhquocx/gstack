@@ -298,6 +298,26 @@ the machine's) and every `requires-remote` obligation carries a receipt
 receipt then carries `pregate` and `requires_remote`. `gstack-pregate verify`
 runs the same check standalone.
 
+**By tree.** Every record `gstack-pregate` writes is also mirrored, byte for
+byte, to `<state root>/pregate/by-tree/<tree>.json` (the state root from
+docs/state-root.md). `gstack-ship-queue ready` reads the checkout's
+`.gstack/tmp/pregate.json` first; when that file is missing or was recorded
+for another tree, or is current but still waits on a remote receipt, it looks
+the current tree up in the mirror and uses that record when it verifies,
+printing `PREGATE: … (from the state root's pregate/by-tree/<tree12>.json,
+recorded by another checkout)`. This is for the lane whose `gstack-pregate
+--remote` had to run from a separate clone (a worktree cannot host it): the
+clone's record clears the lane's own checkout as long as both hold the same
+tree. Only a run that holds the tests stage stands in (what `--stage tests
+--remote` writes, `checks=[lanes]`; a `--only timing` or preflight-only run
+is "a run without the tests stage"), and it must be recorded against
+`origin/<base>` and not under `--policy-from head`;
+otherwise the `PREGATE:` line says why the mirror cannot stand in. A record
+whose own checks failed or stayed incomplete is final and no mirror overrides
+it. An explicit `--pregate <file>` that verifies is used as before; a mirror
+for a different tree changes nothing. Writing the mirror is best effort (a
+temp file renamed into place) and never fails the record itself.
+
 Unknown flags exit 2 with usage on every verb (an agent told to run a flag this
 gstack lacks never gets a green it did not ask for). Tier 2 checks still to come
 (`ratchets`, `lint`, `links`, `hermetic`, `patches`, `integrator`) are named in
@@ -436,7 +456,9 @@ receipt for H when the two trees differ only as a stamp does:
   that does not account for every path `git diff-tree` lists between the two
   trees. The version rule is the tree
   receipt's: a `stamp_files`, `stamp_paths` or `release_outputs` hunk is a stamp
-  only as the rewrite from the gated tree's version to the head's (so two trees
+  only as the rewrite to the head's version from the gated tree's version, or
+  from a newer tentative version of the repo's width that the stamp moved (a
+  `*_KEY_VERSION` written as the next minor, #3512) (so two trees
   at the same version refuse such a hunk as `other`), while the built-in
   version-file, manifest, lockfile and CHANGELOG rules compare content and do
   not check the direction of the version move. The obligation stays uncleared; rerun
@@ -544,7 +566,10 @@ that reads them ships. The worked gbrain configuration is in
 
 The `secrets` check cannot be downgraded, and that is right for a key. It also
 refused 1,800 per-trial dummy tokens in eval receipts (`"key": "sk-trial-<id>"`
-reads as `env.kv`), an 11-digit Actions run id read as a phone number, and
+reads as `env.kv`), an 11-digit Actions run id read as a phone number (one
+after a run word such as `run`, `screen` or `gate` is exempt in the scanner
+since the GSTA-121 follow-up; the allowlist still covers one after any other
+word), and
 excalidraw.com's public Firebase key that every rebuild of a bundle re-adds
 (harness-evals #81/#83, GSTA-102, GSTA-106). `allowlist` in the policy names
 those, each with its scope and its reason:
@@ -891,7 +916,12 @@ gstack-issue-links [--base <ref>] [--issue <n>]... [--ci-run <id>]... [--superse
 Reads `origin/<base>..HEAD`. `Fixes #N` only on explicit closure intent: a
 `Fixes`/`Closes`/`Resolves #N` trailer line or `--issue N`. A bare mention
 (a subject's `(#N)` included), a partial fix, a deferred ask and every
-cross-repo `owner/repo#N` are `Refs`. Same-repo references are printed as
+cross-repo `owner/repo#N` are `Refs`. A parenthesised named reference,
+`(name #N, #M)`, `(name PR #N)` or `(name issue #N)`, where the name is one
+token that is not a closure, reference, filler or version word, is a
+cross-repo `Refs name#N`, never a same-repo Refs line or a promotion
+candidate; `(see #12)`, `(closing #12)` and `(#301)` stay bare refs.
+Same-repo references are printed as
 promotion candidates (`reference #N ← <commit line> (promote: fix #N)` on
 stderr, `candidates` in `--json`): the owner's `fix #N` reply reruns with
 `--issue N`; an unattended run keeps them `Refs` and lists them in the

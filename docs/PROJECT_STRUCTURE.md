@@ -26,7 +26,7 @@ gstack/
 │   ├── gen-agents-digest.ts  # Generates the budget-capped instruction-tier digest (agents-digest/)
 │   ├── host-config.ts     # HostConfig interface + validator
 │   ├── host-config-export.ts  # Shell bridge for setup script
-│   ├── resolvers/   # Template resolver modules (preamble, aside = the Aside driver contract + research, browse = $B fallback setup + command reference, qa = surface-aware QA/exploration, sections = lazy loading, design, design-checklist = renders review/design-checklist.md from lib/design-catalog.ts, review-dashboard / plan-gates / spec-review / review-scope, outside-voice = outside-voice primitives + the one failure policy, outside-voice-steps = second opinion / adversarial / plan and doc review, gbrain, etc.)
+│   ├── resolvers/   # Template resolver modules (preamble, preamble-hoist = the shared sections/preamble.md for tier 2+ skills, aside = the Aside driver contract + research, browse = $B fallback setup + command reference, qa = surface-aware QA/exploration, sections = lazy loading, design, design-checklist = renders review/design-checklist.md from lib/design-catalog.ts, design-craft = craft-section paragraphs and the Persuade checks for /design-review's craft audit and /plan-design-review, review-dashboard / plan-gates / spec-review / review-scope, outside-voice = outside-voice primitives + the one failure policy, outside-voice-steps = second opinion / adversarial / plan and doc review, gbrain, etc.)
 │   ├── lib/shard-engine.ts  # Shared shard engine for both test lanes: spawn, group kill, strict verdicts, per-shard sandbox, logs, duration seeds, flags
 │   ├── skill-check.ts     # Health dashboard
 │   ├── test-free-shards.ts  # Free-lane policy on the shard engine (GSTACK_FREE_JOBS, opt-in flaky retry)
@@ -64,6 +64,7 @@ gstack/
 ├── canary/          # /canary skill (post-deploy monitoring loop)
 ├── codex/           # /codex skill (multi-AI second opinion via OpenAI Codex CLI)
 ├── land-and-deploy/ # /land-and-deploy skill (merge → deploy → canary verify)
+├── modernize/       # /modernize skill (aging PR → MODERNIZE / REWORK / CLOSE disposition, range-diff proof, pinned-lease push)
 ├── office-hours/    # /office-hours skill (YC Office Hours — startup diagnostic + builder brainstorm)
 ├── investigate/     # /investigate skill (systematic root-cause debugging)
 ├── spec/            # /spec skill (five-phase spec → GitHub issue, optional agent spawn, /ship auto-closes)
@@ -78,6 +79,7 @@ gstack/
 ├── cso/             # /cso skill (OWASP Top 10 + STRIDE security audit)
 ├── design-consultation/ # /design-consultation skill (design system from scratch)
 ├── design-shotgun/  # /design-shotgun skill (visual design exploration)
+├── design-motion/   # /design-motion skill (showcase loops: deterministic capture, MP4 and GIF exports)
 ├── open-gstack-browser/  # /open-gstack-browser skill (launch GStack Browser)
 ├── connect-chrome/  # symlink → open-gstack-browser (backwards compat)
 ├── setup-browser-cookies/, pair-agent/, skillify/  # Fallback-engine skills (cookie import, shared-browser tunnel, codify a /scrape)
@@ -96,7 +98,7 @@ gstack/
 ├── docs/designs/    # Design documents (incl. IMPECCABLE_INTEROP.md = the design detector / catalog / open DESIGN.md record, and fork-port-residual-2026-09/ evaluation evidence)
 ├── setup-deploy/    # /setup-deploy skill (one-time deploy config)
 ├── .github/         # CI workflows + shared composite actions (.github/actions/) + Docker image (claude CLI pinned)
-│   ├── workflows/   # evals.yml (E2E on Ubicloud), quality-gate.yml (secret scan), dependency-review.yml, osv-scanner.yml, skill-docs.yml, actionlint.yml, plus free-tests, Windows, periodic and marathon evals, CSO release, platform qualification and smaller gates
+│   ├── workflows/   # evals.yml (E2E on Ubicloud), quality-gate.yml (secret scan, CHANGELOG prose lint), dependency-review.yml, osv-scanner.yml, skill-docs.yml, actionlint.yml, plus free-tests, Windows, periodic and marathon evals, CSO release, platform qualification and smaller gates
 │   └── docker/      # Dockerfile.ci (pre-baked toolchain + Playwright/Chromium)
 ├── contrib/         # Contributor-only tools (never installed for users)
 │   └── add-host/    # /gstack-contrib-add-host skill
@@ -104,7 +106,7 @@ gstack/
 ├── SKILL.md         # Generated from SKILL.md.tmpl (don't edit directly)
 ├── SKILL.md.tmpl    # Template: edit this, run gen:skill-docs
 ├── ETHOS.md         # Builder philosophy (Boil the Ocean, Search Before Building)
-├── NOTICE.md        # Third-party notices: material derived from impeccable and the DESIGN.md spec (Apache-2.0), Elaya's design skills and hallmark's sloplint (MIT)
+├── NOTICE.md        # Third-party notices: material derived from impeccable and the DESIGN.md spec (Apache-2.0), Elaya's design skills and hallmark's sloplint (MIT), plus courtesy entries for tstack and pstack ideas and word lists (MIT; no license text carried)
 ├── licenses/        # Verbatim license texts for the notices above (Apache-2.0.txt, MIT-elaya.txt, MIT-hallmark.txt)
 └── package.json     # Build scripts for browse
 ```

@@ -129,7 +129,8 @@ a fork's "tests pass": run a focused review and the free tier at the port head b
 port opens. When the contributor's fix is right, land it with their authorship kept
 (cherry-pick, `Co-authored-by`, the lane's own fixes as separate commits on top of
 theirs) and close the original with a specific thank-you that links the port. Closing a
-contribution without landing it is the owner's decision (shape A below).
+contribution without landing it is the owner's decision (shape A below). The repository's
+own statement of the porting steps is [CONTRIBUTING.md](../CONTRIBUTING.md#porting-a-contributors-pr).
 
 ## The READY contract
 
@@ -165,7 +166,7 @@ a push included. The sequence that works unattended on Capy:
    to the current tree.
 6. Docs audit: snapshot the documentation candidates read-only and record the vetted
    section.
-7. Body and receipt: compose the PR body (What changed, Why, Approvals first on Capy),
+7. Body and receipt: compose the PR body (What changed, Why, Blast radius, Approvals first on Capy),
    write the ship receipt into it, post body and title.
 8. Terminal line: `gstack-ship-receipt result --pr <n>` prints
    `GSTACK_RESULT: skill=ship status=complete`.
@@ -207,6 +208,21 @@ files. In practice slot 1 needs the same merge whenever the base moved after the
 taken. A stamp commit with one extra byte freezes the queue for every
 lane behind it.
 
+The slot stamp is the base merge, `mergeChangelogs`, and the stamp files the slot call
+names (`STAMP_FILES` in CREW.md; gstack's are `CHANGELOG.md`, `VERSION`, `package.json` and
+`agents-digest/gstack-AGENTS.md`, plus the file carrying a `*_KEY_VERSION` the PR
+introduced, which the restamp moves on the PR's own line, when the call names it), never a
+fifth: a file the restamp lists that the call did not name is not a stamp, so the lane
+leaves it out and says so in its READY. The restamp itself never
+moves a line the base added since the pin's fork point, base merge committed or staged. A
+pin stacked on a PR that squash-merged earlier conflicts beyond the CHANGELOG where the
+parent's squash touched the pin's lines, so the lane takes its pin's bytes for those files
+(`verify` checks the tree against T<i>, which already carries the parent), and
+`mergeChangelogs` carries the pin's edits to the parent's now-released entry as Gate
+integrity corrections in the pin's own entry. The post-merge `verify` judges the CHANGELOG
+by the same rule the pre-merge one did, so an accepted head never freezes the queue after
+its merge ([ship-policy.md](ship-policy.md#run-a-merge-train)).
+
 Options the controller writes into CREW.md rather than inheriting: squash versus merge
 commits; lane stamps versus controller stamps; gate-ahead (slot i+1 gates on slot i's
 head while i merges); the severe race (several severe lanes told at once that the next
@@ -232,7 +248,7 @@ recommendation at full scope. `gstack-owner-brief render --captain` prints it fr
 autoplan run.
 
 **C. The merge ask** ([template](../captain/templates/merge-ask.md)): captioned
-before/after images, why, the Approvals table, and the evidence. /ship writes the PR
+before/after images, why, blast radius, the Approvals table, and the evidence. /ship writes the PR
 body in this shape on Capy; the controller's merge report shows the key image inline.
 
 ## The digest

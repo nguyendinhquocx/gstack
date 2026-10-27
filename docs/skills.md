@@ -15,12 +15,14 @@ Detailed guides for every gstack skill — philosophy, workflow, and examples.
 | [`/design-review`](#design-review) | **Designer Who Codes** | Live-site visual audit + fix loop. 80-item audit, then fixes what it finds. Atomic commits, before/after screenshots. |
 | [`/design-shotgun`](#design-shotgun) | **Design Explorer** | Generate multiple AI design variants, open a comparison board in your browser, and iterate until you approve a direction. Taste memory biases toward your preferences. |
 | [`/design-html`](#design-html) | **Design Engineer** | Generates production-quality Pretext-native HTML. Works with approved mockups, CEO plans, design reviews, or from scratch. Text reflows on resize, heights adjust to content. Smart API routing per design type. Framework detection for React/Svelte/Vue. Previews render through your Aside browser. |
+| [`/design-motion`](#design-motion) | **Motion Designer** | Turns an approved design into a showcase loop: rebuilds the exact frame, loads it from empty, one story per visual, then an MP4 for X, a website GIF and an 800×500 GIF after seam, rest and overflow checks. |
 | [`/qa`](#qa) | **QA Lead** | Explore browser and functional behavior (APIs, CLIs, jobs, workers, webhooks), reproduce defects, prove regressions fail before repair, then fix and re-verify. |
 | [`/qa-only`](#qa) | **QA Reporter** | Explore the same surfaces and propose regression cases with evidence, without changing product code or tests. |
 | [`/scrape`](#browse) | **Browser Data Extractor** | Pull structured data off a web page — tables, lists, prices — in your Aside browser with the page's real logged-in state. Same driver contract as `/browse`. On the fallback browser, a codified browser-skill answers a repeat intent in ~200ms. |
 | [`/skillify`](#browse) | **Skill Codifier** | Fallback-browser skill: walks back through your conversation, finds the last `/scrape` prototype, synthesizes script + test + fixture, runs the test, asks before committing. On Aside, durable per-site automation belongs to Aside's own skills. |
 | [`/ship`](#ship) | **Release Engineer** | Sync main, run tests, explore changed behavior within a bound, audit coverage and docs before final verification, then push and open or update a PR. Bootstraps test frameworks when appropriate. |
 | [`/land-and-deploy`](#land-and-deploy) | **Release Engineer** | Merge the PR, wait for CI and deploy, verify production health. One command from "approved" to "verified in production." |
+| [`/modernize`](#modernize) | **Stale-PR Maintainer** | Bring an aging PR onto its current base and decide whether it should still exist: MODERNIZE, REWORK or CLOSE. Reads what moved under the PR for conflicts in meaning, proves the rebase with `git range-diff`, pushes with a lease pinned to the observed head, and never closes a PR on its own. |
 | [`/canary`](#canary) | **SRE** | Post-deploy monitoring loop. Watches for console errors, performance regressions, and page failures in your Aside browser. |
 | [`/benchmark`](#benchmark) | **Performance Engineer** | Baseline page load times, Core Web Vitals, and resource sizes. Compare before/after on every PR. Track trends over time. |
 | [`/ubicloud`](#ubicloud) | **Remote Runner** | Run a heavy suite, build or eval on an ephemeral 16-vCPU Ubicloud VM: TTL-named VMs with a reaper, quota preflight, a hang watchdog and one committed verify per repository. |
@@ -555,6 +557,43 @@ Claude: Saved to ~/.gstack/projects/myapp/designs/hero-20260330/finalized.html
 
 ---
 
+## `/design-motion`
+
+This is my **showcase mode**.
+
+A launch post on X wants the product moving, not a static mockup. Screen-recording a page in real time gives you dropped frames, a loop that jumps at the seam, and a card that drifts out of its container halfway through.
+
+`/design-motion` takes an approved mockup from `/design-shotgun`, a `finalized.html` from `/design-html`, or a URL. It rebuilds the exact frame as one self-contained page, starts it from an empty state, loads it in with a soft rise-and-resolve, and gives each visual one story: a chart gets read, a list receives a new item, a prompt retypes itself. Then it dissolves and repeats.
+
+Nothing is recorded in real time. `bin/gstack-motion-capture.ts` drives the page on Playwright's fake clock in whole-millisecond steps that average 1000/60, so frame N is always the same pixels. `bin/gstack-motion-encode check` then proves the loop with ffmpeg's PSNR: the first frame equals the frame one cycle later (seam), the empty beat equals the frame before the start (no JS state left over), the last frame before the dissolve equals the still design (every story came home), and nothing moves outside the containers (overflow). Only then does `export` write an MP4 for X, a 960 px website GIF and an 800×500 GIF.
+
+On a website it follows gstack's design rules instead: one authored motion moment per page, content visible without script, and no pulsing dots or marquees left running. ffmpeg is optional; without it the skill builds the page and tells you how to install it. A Figma source works when a `FIGMA_TOKEN` is set.
+
+Adapted from Elaya's [design-to-motion](https://github.com/elayadesign/ai-design-skills) (MIT, © 2026 Elaya).
+
+### Example
+
+```
+You:   /design-motion
+
+Claude: Found approved mockup: variant-B.png (analytics bento, 1440×990)
+        Context: showcase. Layout: separate cards (4).
+        Stories: chart scrubber, a new lead lands on the stack, KPI counts up.
+        Cycle: 12 s.
+
+        [Rebuilds the frame, still matches the mockup at 37 dB]
+        [Captures 744 frames on a fake clock]
+
+        MOTION_CHECK: seam pass
+        MOTION_CHECK: empty-beat pass
+        MOTION_CHECK: rest pass
+        MOTION_CHECK: overflow pass
+
+        bento-x.mp4 (1744×1200, 60 fps, 12 s), bento-loop.gif, bento-800x500.gif
+```
+
+---
+
 ## `/review`
 
 This is my **paranoid staff engineer mode**.
@@ -697,6 +736,17 @@ Every `/ship` run builds a code path map from your diff, searches for correspond
 
 A lot of branches die when the interesting work is done and only the boring release work is left. Humans procrastinate that part. AI should not.
 
+### The PR body
+
+`/ship` writes the PR body from the diff, the receipt and the review, and a reader who was not in the session decides the merge from it. On Capy (`CAPY_PR: on`) the body opens with four sections, in this order, before the standard Summary, Test plan and Documentation sections:
+
+1. **`## What changed`**: one to three captioned before/after images from `gstack-pr-shots` or a UI screenshot, highest-signal first, with a collapsed text version under each.
+2. **`## Why`**: two or three sentences. The first states the problem in the person's words (the issue, the message, the failing run), then the cause and the user-visible effect.
+3. **`## Blast radius`**: what else the change touches and the one fact that makes that safe, with the evidence-ladder rung that fact reached (a test that exercises the shared path, a grep over every caller, a measured run). A change to a shared helper, a generated file, a selection list or a policy default always has one; a leaf fix says so in one line.
+4. **`## Approvals`**: the table from `gstack-approvals render`, verbatim.
+
+Before the body is composed, `gstack-prose-lint` reads the Why, Summary and Blast radius drafts (`--sections 'Why,Summary,Blast radius' --gate`) and the CHANGELOG entry (`--base origin/<base> --gate`), and a `PROSE_LINT_FOUND` line names the sentence to rewrite; the rest of the body is advisory. The Captain's merge-ask template (`captain/templates/merge-ask.md`) carries the same four sections, so a READY report and its PR say the same thing.
+
 ### Versions: where `/ship` looks, and when it ships without one
 
 `/ship` bumps a version only when the project says where the version lives. It checks, in order:
@@ -750,6 +800,39 @@ Claude: Merging PR #42...
 ```
 
 ---
+
+## `/modernize`
+
+`/ship` merges the base into a branch you are working on. `/modernize` is for the other
+case: a pull request that has sat for weeks, often someone else's, where the real question
+is not "does it rebase" but "should it still exist".
+
+```
+You: /modernize 2187
+
+Claude: Claim: #2187 caches the skill census so `bun run skill:check` stops
+        re-reading 57 directories. It relies on the census being read once per run.
+
+        Moved under it: 41 base commits since the merge base; 3 touch its files.
+        Conceptual: a2f9c01 (v1.91.240.0) made the census a shared helper that
+        already memoizes per process. The cache the PR adds would be a second one.
+
+        Verdict: CLOSE. The base solves the problem another way (a2f9c01). Nothing
+        was pushed and the PR stays open; say "close it" and I will post the reason
+        and the superseding commit, with thanks to its author.
+```
+
+Three verdicts, one chosen before anything is pushed. **MODERNIZE**: the claim still
+holds, so the branch is rebased with the author's commits kept as theirs, `git
+range-diff` proves no intent was lost (every changed hunk gets a one-line reason), the
+repository's own tests run, and the push is `--force-with-lease=<branch>:<sha observed
+before the rebase>`, so a push someone else made meanwhile is refused rather than
+overwritten. **REWORK**: the problem is real but this diff is no longer the way to solve
+it; the skill says what the new change would be and pushes nothing. **CLOSE**: the
+problem is gone, solved another way, or decided against; the skill recommends closing
+with the superseding commit and leaves the PR open until someone with the authority says
+otherwise. A clean `git rebase` is not evidence the PR is current, and the age of a PR
+is not evidence either way.
 
 ## `/canary`
 
@@ -852,12 +935,12 @@ This is my **performance engineer mode**.
 
 `/benchmark` establishes performance baselines for your pages: load time, Core Web Vitals (LCP, CLS, INP), resource counts, and total transfer size. Run it before and after a PR to catch regressions.
 
-It measures in your Aside browser — the page's own `performance` navigation and resource entries from a real load, not synthetic estimates. Multiple runs averaged. Results persist so you can track trends across PRs.
+It measures in your Aside browser — the page's own `performance` navigation and resource entries from a real load, not synthetic estimates. Each page runs five times and is reported as the median with its range (`--quick` is a single-run ballpark). Results persist so you can track trends across PRs.
 
 ```
 You:   /benchmark https://myapp.com
 
-Claude: Benchmarking 5 pages (3 runs each)...
+Claude: Benchmarking 5 pages (5 runs each)...
 
         /           load: 1.2s  LCP: 0.9s  CLS: 0.01  resources: 24 (890KB)
         /dashboard  load: 2.1s  LCP: 1.8s  CLS: 0.03  resources: 31 (1.4MB)

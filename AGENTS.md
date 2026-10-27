@@ -36,6 +36,7 @@ Invoke them by name (e.g., `/office-hours`).
 | `/design-review` | Live-site visual audit + fix loop with atomic commits. |
 | `/design-shotgun` | Generate multiple AI design variants, comparison board, iterate. |
 | `/design-html` | Generate production-quality Pretext-native HTML/CSS. |
+| `/design-motion` | Turn an approved design into a showcase loop: MP4 for X, website GIF, 800×500 GIF, with seam, rest and overflow checks. |
 | `/devex-review` | Live developer experience audit (TTHW measured against the real flow). |
 | `/qa` | Test browser, API, CLI, job, worker and webhook behavior; reproduce bugs, fix them and re-verify. |
 | `/qa-only` | The same surface-aware QA, reporting findings and proposed tests without changing product code or tests. |
@@ -48,6 +49,7 @@ Invoke them by name (e.g., `/office-hours`).
 |-------|-------------|
 | `/ship` | Run tests, review, gate integrity, push, open PR. Workspace-aware version queue. |
 | `/land-and-deploy` | Merge the PR, wait for CI and deploy, verify production health. |
+| `/modernize` | Bring an aging PR onto its current base and decide MODERNIZE, REWORK or CLOSE, with `git range-diff` proof before a pinned-lease push. Never closes a PR itself. |
 | `/canary` | Post-deploy monitoring loop in your Aside browser (or gstack's own when Aside is absent). |
 | `/landing-report` | Read-only dashboard for the workspace-aware ship queue. |
 | `/document-release` | Audit relevant docs before final verification on every ship; also supports standalone documentation updates. |
@@ -154,6 +156,9 @@ When fixing failures or preparing `/ship`, follow this order:
    only when that prose is the contract. Do not lower thresholds, increase model
    budgets, skip cases, or rejudge a failure to manufacture a pass. A
    pre-registered fixed panel is not rejudging.
+   For any measured speedup, regression or eval delta, name the limiter that
+   moved and the run-to-run variation; a gap smaller than that variation is no
+   difference.
    For policy or validation repairs, exercise the actual registered callback with
    representative native input and assert that it uses the helper’s result.
    When renderer or parser failures recur at the same boundary, verify the

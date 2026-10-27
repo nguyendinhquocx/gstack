@@ -97,7 +97,7 @@ export interface HostConfig {
 
   // --- Generation ---
   generation: {
-    /** Whether to create a metadata file alongside skills (always openai.yaml; gen-skill-docs hardcodes the format). */
+    /** Whether to create a metadata file alongside skills (always openai.yaml; gen-skill-docs hardcodes the format and reads the template's `codex_default_prompt:` key for its default_prompt). */
     generateMetadata: boolean;
     /** Skill directories to exclude from generation for this host. */
     skipSkills?: string[];
@@ -140,6 +140,17 @@ export interface HostConfig {
   learningsMode?: 'full' | 'basic';
   /** Anti-prompt-injection boundary instruction for cross-model invocations. */
   boundaryInstruction?: string;
+
+  // --- Session transcripts ---
+  /**
+   * Where this host keeps its own chat transcripts on disk, read by
+   * /context-restore's no-checkpoint fallback (sections/transcripts.md).
+   * `root` is the path pattern shown to the user; `layout` says how the
+   * current workspace's files are told apart from another project's. Absent:
+   * the host declares no transcript store, and the skill says so and falls
+   * back to the shared record and git.
+   */
+  transcripts?: { root: string; layout: string };
 }
 
 // --- Validation ---

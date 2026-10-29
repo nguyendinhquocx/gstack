@@ -562,6 +562,26 @@ leave it out and report it. The tree receipt refuses such a move after the fact
 only while the moved version is older than the base's at the build, so the
 restamp, not the receipt, is what keeps the base's key in place.
 
+**Size caps compose; nothing re-pins at the slot.** Ship's union-size cap is a
+ledger, `test/size-ledger/ship/`: `base.json` plus one `<branch>.json` per
+branch that changed ship's union bytes (`{ "bytes": <signed>, "why": "…" }`),
+and the parity suite requires ship's union bytes to equal the base plus every
+entry, exactly. A lane records its own change once, before /ship, with `bun
+--no-env-file --config=/dev/null scripts/size-ledger.ts record ship --why
+"<what changed>"`. The entry is a property of the branch's own diff, so it
+stays right across base merges, and each prefix carries the entries of the
+slots in it, so T<k> passes with no re-pin and the stamp commit stays the four
+files (a cap re-pinned at the slot would be a fifth file on a tree the gate
+never ran). A clean merge adds byte deltas exactly; overlapping hunks are a
+train conflict anyway, and two branches making an identical edit (git keeps
+one copy, both entries count) fail closed with the same record command as the
+fix. A branch that grows ship beyond its entry, or shrinks it without a
+negative one, fails on its own tree and on every prefix that includes it.
+`scripts/size-ledger.ts check ship` prints the ledger; `fold ship
+--measured-at <tree>` moves the entries into `base.json` in a tidy-up PR,
+never in a stamp commit. Other skills keep their `maxSizeRatio` caps in
+`test/helpers/carve-guards.ts`.
+
 **A stacked child whose parent merged earlier.** When the pin was stacked on a
 PR that squash-merged in an earlier slot or train, the base merge conflicts
 beyond the CHANGELOG wherever the parent's squash and the pin touched the same
@@ -624,9 +644,19 @@ freezes the same way, since main already holds the unverified squash. The
 record comes from the one GitHub read that decided to freeze, never a second
 one: a slot that read MERGED stays merged even when GitHub stops answering
 before the record is written, and a slot unreadable beside a merged one is
-left out of `unmerged` and named in the reason; nothing reads it again, so
-the `NEXT:` after the repair omits it and the operator seats it in a train by
-hand once `gh pr view` answers. When
+left out of `unmerged`, recorded under `unreadable` and printed on an
+`unreadable:` line; the `NEXT:` after the repair names it (`gh pr view <n>
+--json state,headRefOid (unreadable at the freeze: #<n>@<sha>); seat each
+that is OPEN in a train`).
+When every slot of the train already merged on GitHub and main's SHA is a
+prefix another train's verify confirmed (read after the notes ref, so a
+machine that never ran that train still sees it), the mismatch says nothing
+about this train: verify refuses with `QUEUE_TRAIN_STALE` and `NEXT:
+gstack-ship-queue train prune --stale --train <nonce>`, freezing nothing and
+dispatching no backstop (train 24's record froze the queue that way on a main
+train 28 had verified, #3519). Only a verify that fetched main takes this
+exit: under `--no-fetch` the local main may be older than GitHub's, so the
+mismatch freezes as before. When
 whether a slot merged on GitHub cannot be read, verify refuses
 (`QUEUE_PROOF_MISSING`, "whether #<n> merged on GitHub could not be read")
 and asks to be rerun once `gh pr view` answers; an unreadable state is never
@@ -830,15 +860,18 @@ construction:
    fix-range`) or in the diff is `scope: fix`; nothing below the floor earns a
    pass. `NO FINDINGS` is the expected reviewer result for a clean range, never a
    failed review.
-3. **Three passes is the cap.** A pass that applied no edits continues to Step 10:
-   the loop ships with its deferred and noted items named in the PR body. A
-   blocking finding still in `fix` scope on pass 3 stops the run and names the
-   finding (path, severity, problem) for the owner instead of a fourth pass.
+3. **Two full passes plus one fix-check is the cap**, stepped by the
+   [transition table](review-policy.md#transitions). A pass that applied no edits
+   continues to Step 10: the loop ships with its deferred and noted items named in
+   the PR body. A blocking finding still open after the last allowed step stops
+   the run and names the finding (path, severity, problem) for the owner instead
+   of a third full pass.
 
 `gstack-review-scope summary --since <REVIEW_SINCE>` reads the branch's review-log
 rows for this invocation and writes the counters the ship receipt carries
 (`gstack-ship-receipt write … --review-loop @<file>`): `review_loop: { passes,
-blocking_found, deferred, noted, fixed, scope }`, printed on the receipt summary
+blocking_found, deferred, noted, fixed, scope }`, plus `fix_checks`, `dispatches`
+and `est_input_tokens` when the run recorded them, printed on the receipt summary
 line as `passes=<n> blocking_found=<k> deferred=<m>`, so a scorecard can track
 passes per PR.
 
@@ -903,10 +936,27 @@ A changed product path, or a product patch-id that differs, is
 (exit 3; the refusal names the paths), and a receipt whose head is not in HEAD's
 history (a rebase or force-push) or a working tree with uncommitted changes is
 [`RECEIPT_CARRY_REFUSED`](troubleshooting.md#receipt-carry-refused): run `/ship`
-on the new head. `/ship` Step 1 runs the carry check itself when the branch has
-an open PR, and a `CARRY: carried` result ends that run with the receipt bound
-to HEAD; the queue's `ready`, `train build` and `verify --train` read the
+on the new head. The queue's `ready`, `train build` and `verify --train` read the
 carried receipt like any other.
+
+**Delta /ship: eligibility, then checks, then publication.** `/ship` Step 1 runs
+the carry when the branch has an open PR, in this order, and never reruns the
+review loop for a carried receipt:
+
+1. `gstack-ship-receipt carry --pr <n> --base <base> --dry-run`. `CARRY: would
+   carry` is eligibility only; a refusal continues the full ship.
+2. At that pinned HEAD: the CHANGELOG check, the size-cap check the policy
+   declares, and `gstack-pregate` (the remote tests stage when
+   `requires_remote` asks for it). A failing check, or HEAD moving, continues
+   the full ship from Step 2.
+3. `gstack-ship-receipt carry --pr <n> --base <base> --pregate <pregate.json>`
+   rebinds the receipt with a pregate current for HEAD and ends the run.
+
+A receipt that records a pregate never rebinds without a current one:
+`carry` without `--pregate` (or with a stale one) is
+[`RECEIPT_CARRY_PREGATE_STALE`](troubleshooting.md#receipt-carry-pregate-stale)
+and leaves the body unchanged. A crew that reran the whole `/ship` after every
+base merge should run this sequence instead.
 
 ## What `/land-and-deploy` reads from it
 

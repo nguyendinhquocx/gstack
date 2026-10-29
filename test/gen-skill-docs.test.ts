@@ -2343,7 +2343,7 @@ describe('DESIGN_OUTSIDE_VOICES resolver', () => {
   });
 
   test('design-review contains outside voices section', () => {
-    const content = fs.readFileSync(path.join(ROOT, 'design-review', 'SKILL.md'), 'utf-8');
+    const content = readSkillUnion('design-review');
     expect(content).toContain('Design Outside Voices');
     expect(content).toContain('source audit');
   });
@@ -3689,11 +3689,11 @@ describe('setup script validation', () => {
     expect(claudeSection).toContain('link_claude_root_skill_alias "$SOURCE_GSTACK_DIR" "$INSTALL_SKILLS_DIR"');
   });
 
-  test('setup supports --host auto|claude|codex|kiro|opencode|cursor; slate is informational', () => {
+  test('setup supports --host auto|claude|codex|kiro|opencode|cursor|openclaw|hermes; slate is informational', () => {
     expect(setupContent).toContain('--host');
     // #2361: slate moved OUT of the install accept-list (it was accepted but
     // never dispatched — a silent exit-0 no-op) into an informational arm.
-    expect(setupContent).toContain('claude|codex|kiro|factory|opencode|cursor|copilot|agy|auto');
+    expect(setupContent).toContain('claude|codex|kiro|factory|opencode|cursor|copilot|agy|openclaw|hermes|auto');
     expect(setupContent).toMatch(/^ {2}slate\)/m);
   });
 

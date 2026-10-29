@@ -127,6 +127,11 @@ export const RELEASE_RESULT_CODES = {
     summary: 'main’s tree is neither the train’s prefix before this PR nor after it (modulo stamps), so the merge does not publish what the gate tested',
     fix: 'stop merging; if earlier PRs of the train merged, the queue is frozen (QUEUE_TRAIN_FROZEN); otherwise rebuild the train on current main',
   },
+  QUEUE_TRAIN_STALE: {
+    anchor: 'queue-train-stale',
+    summary: 'every slot of this train already merged on GitHub and main is a prefix another train verified, so the record is stale; comparing today’s main to its prefixes proves nothing and does not freeze the queue',
+    fix: 'settle the record with train prune --stale --train <nonce>; no backstop is needed',
+  },
   QUEUE_TRAIN_FROZEN: {
     anchor: 'queue-train-frozen',
     summary: 'a train stopped partway through publication, so main holds a prefix no gate covered on its own; ordinary trains are refused until a repair lands',
@@ -263,6 +268,11 @@ export const RELEASE_RESULT_CODES = {
     anchor: 'receipt-prose-mismatch',
     summary: 'the PR body quotes a counter the ship receipt also records (review passes, deferred findings, gate case counts) with a different number, so the prose and the receipt disagree about the same run',
     fix: 'correct the body to the receipt\'s number (the PROSE: line names each field with both values); when the receipt is the stale one, rerun /ship so the receipt is rewritten from the run',
+  },
+  RECEIPT_CARRY_PREGATE_STALE: {
+    anchor: 'receipt-carry-pregate-stale',
+    summary: 'gstack-ship-receipt carry would rebind a receipt that records a pregate without a pregate result current for HEAD, so the carried receipt would claim the old tree\'s checks',
+    fix: 'run gstack-pregate at HEAD (the remote tests stage when the policy requires it), then rerun carry with --pregate <pregate.json>',
   },
   RECEIPT_GIT_TOO_OLD: {
     anchor: 'receipt-git-too-old',

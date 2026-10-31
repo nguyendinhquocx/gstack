@@ -148,8 +148,12 @@ The other endings, each greppable: when gh cannot read the PR,
 `GSTACK_RESULT: skill=ship status=incomplete run=-` (exit 1); a receipt that is
 missing or names another head, `GSTACK_RESULT: skill=ship status=refused run=-`
 with `QUEUE_RECEIPT_MISSING` or `QUEUE_RECEIPT_STALE` on stderr (exit 3), the
-line a run that stops before publication prints itself; and `result --pr <n>`
-refuses `QUEUE_RECEIPT_STALE` when HEAD is not the PR's pushed head.
+line a run that stops before publication prints itself; `result --pr <n>`
+refuses `QUEUE_RECEIPT_STALE` when HEAD is not the PR's pushed head; and a
+receipt with a `base_red` block (Step 5 paused on a red base) prints
+`SHIP_PAUSED: base-red …` on stderr, writes the run record and ends
+`GSTACK_RESULT: skill=ship status=incomplete run=<dir>` (exit 1): the lane is
+waiting on the base, not failed ([base_red](ship-policy.md#base-red)).
 
 The one publication the unattended rules allow: when an open PR for the branch
 exists and HEAD is its pushed head, Step 18 takes the pr-body section's
@@ -192,7 +196,7 @@ never on polling wakes.
 A parent bounds a /ship run with `--token-cap <n>` (or `GSTACK_SHIP_TOKEN_CAP`).
 It is an admission cap: /ship meters usage, reserves every step and dispatch
 batch before it starts, and stops `status=incomplete` with a `RECOVER:` line
-instead of starting work that would cross the cap. Long runs hand Steps 7–11.5
+instead of starting work that would cross the cap. Long runs hand Steps 9–11.5
 and 12–22 to fresh-context children. The flow, the BUDGET line and the result
 codes are in [ship-budget.md](ship-budget.md).
 

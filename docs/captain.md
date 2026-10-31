@@ -35,9 +35,11 @@ by a daily pass; nothing is retried into green.
   rules file, the digest and the notes, validates READYs, builds and merges trains, calls
   slots, relays asks to the owner in the three shapes, runs the flaky pass, and decides
   everything that needs no access, credentials, spend over cap or a cited approval. It
-  archives its own child threads, including ones its crew or its automations started
-  outside the crew, when its plan for each thread says that thread's work is done; it
-  knows each thread's next step, so nobody else archives them.
+  archives only its own crew threads, each when its plan for that thread says the work is
+  done; it knows each thread's next step, so nobody else archives them. A thread outside
+  every crew belongs to the owner and stays as it is: no Captain archives it, flags it or
+  lists it for archiving unless the owner asks, even when the Captain's own automation
+  created it.
 - **A lane** (a crew thread) owns named files, builds on its own branch and machine,
   runs /ship, sends one READY block, stamps on call (merging the base into its pin only
   as part of that stamp commit, or when the controller names a real-code conflict),
@@ -144,7 +146,7 @@ this rule shipped cites this section by name.
 
 **What the lane sends.** The plan and its gate in plain language a person outside the
 project can follow: what changes, why now, what the change does, what it costs, the lane's
-pick, and the recommended one-word reply. `gstack-owner-brief render --captain --out <run dir>`
+pick, and the choices as lettered ask lines ([the ask format](#the-ask-format)). `gstack-owner-brief render --captain --out <run dir>`
 prints that from the plan's `## ELI5`, `## Before → after`, `## Why it matters`,
 `## What caused this work` and `## Big decisions` sections (also saved as `eli5` in
 `gate.json`, so `gstack-gate render` opens with them), with the cost lines
@@ -153,10 +155,10 @@ section exits `CAPTAIN_BRIEF_INCOMPLETE`, so the lane adds the section and rende
 ([capy/skill/gstack/captain.md](../capy/skill/gstack/captain.md) § 3 lists them). The lane
 sends it whole, as a needs-you report, and builds nothing yet.
 
-**What the controller relays.** One ask to the owner in shape B below: the recommended
-reply (every recommendation, plan changes included) as the one-word default and a "do it"
-reply that takes every recommendation at full scope, follow-ons included. The plan as
-first written is never the default.
+**What the controller relays.** One ask to the owner in shape B below, its choices in
+[the ask format](#the-ask-format): "do it" (every recommendation, plan changes included,
+at full scope, follow-ons included) is the default, and a named option such as "A2" takes
+that option instead. The plan as first written is never the default.
 
 **The build gate.** The lane builds only after the owner's word has come back through the
 controller and been answered into the run
@@ -241,11 +243,24 @@ a push included. The sequence that works unattended on Capy:
 7. Body and receipt: compose the PR body (What changed, Why, Blast radius, Approvals first on Capy),
    write the ship receipt into it, post body and title.
 8. Terminal line: `gstack-ship-receipt result --pr <n>` prints
-   `GSTACK_RESULT: skill=ship status=complete`.
+   `GSTACK_RESULT: skill=ship status=complete`. `SHIP_PAUSED: base-red …` with
+   `status=incomplete` means Step 5 proved its failures are the base's own
+   ([base_red](ship-policy.md#base-red)): the lane is waiting, not failed. It
+   registers `gstack-base-red wait --pause <file>` as a background operation,
+   tells the controller which cases hold it, and on `BASE_GREEN` runs
+   `/ship --resume <record>`; no READY goes out on the conditional receipt,
+   except on a train with `gates` ([Merge trains for other repos](#merge-trains-for-other-repos)).
 9. READY: `gstack-ship-queue ready --pr <n> --pregate <pregate.json> --screen|--no-screen`;
    send the printed block.
 10. After the slot call, the stamp commit keeps the pin's receipt; re-READY with the same
     receipt, no second /ship.
+
+When /ship runs in a subagent, the parent subscribes to the pull request's check and
+review notices as soon as the subagent opens it, and stops the /ship subagent only once
+that subscription is in place and its READY arrives. From then on the parent owns the pull
+request: red checks, human review, the slot stamp and re-READY of step 10, and any receipt
+carry. It does that work itself or sends it to the subagent as an explicit instruction. On
+Capy the mechanics are in [the gstack skill](../capy/skill/gstack/SKILL.md#plan-approve-ship).
 
 When the base moves under a reviewed branch, merge it in; never rebase. A merge that
 leaves the product diff unchanged carries the receipt with `gstack-ship-receipt carry`
@@ -316,6 +331,27 @@ head while i merges); the severe race (several severe lanes told at once that th
 urgent train is theirs, first complete READY takes it; never a race for a slot inside a
 built train); whether a READY also carries a gate run id and tree hash.
 
+### Merge trains for other repos
+
+A repository without gstack's eval workflow declares `gates` in its train block
+([ship-policy.md](ship-policy.md#train-gates)): its own CI workflows, a test
+command on a Ubicloud VM, or both. Every prefix is gated, so a red train names
+its culprit with no bisect and no rebuild. To turn one on, run `train init` in
+a checkout, commit the printed block (and the workflow snippet) on the base
+branch through a PR, then run `train doctor` until it reports no findings.
+
+The controller's loop shortens to `train build --prs <pins>`, then
+`train watch --train <nonce> --land`, which waits for every prefix run, reads
+the verdict and lands each landable slot in order. Lanes READY with
+`ready --pr <n> --no-screen`; there is no screen and no slot call. A lane whose
+/ship paused on a red base READYs with `--base-red --fixer <pr>`, its fixer with
+`--fixes-base-red <cases>`, and the train seats the fixer at slot 1. The `update` commit `train land` pushes to a PR
+branch (the gated tree on [pin, main]) is the one exception to CREW rule 14's "never merge
+the base into a PR": it is tool-made, recorded before the push, and pushed under the pin's
+lease, like a stamped train's stamp commit. A peer crew
+adopting this starts from
+[captain/templates/merge-train-peer.md](../captain/templates/merge-train-peer.md).
+
 ## Approvals: three shapes
 
 **A. The record.** Every lane keeps an `## Approvals` table in its report and PR body,
@@ -329,21 +365,54 @@ owner pre-approved (train gates, screens, bisects, the backstop, focused paid ca
 the owner's date and words and the cap per rerun; anything over the cap is a fresh ask.
 
 **B. The plan ask** ([template](../captain/templates/plan-ask.md)): before → after, why it
-matters, what caused this work, the big decisions, what we need from you with the
-recommended one-word reply as the default, and a closing "do it" reply that takes every
-recommendation at full scope. `gstack-owner-brief render --captain` prints it from an
+matters, what caused this work, the big decisions, and what we need from you in the ask
+format below, closed by "do it", which takes every recommendation at full scope.
+`gstack-owner-brief render --captain --captain-name "<Captain name>"` prints it from an
 autoplan run.
 
 **C. The merge ask** ([template](../captain/templates/merge-ask.md)): captioned
 before/after images, why, blast radius, the Approvals table, and the evidence. /ship writes the PR
 body in this shape on Capy; the controller's merge report shows the key image inline.
 
+## The ask format
+
+Every ask to the owner, from a plan gate to a merge question to the digest, is written so a
+five-year-old could follow it: the Captain's name, then one lettered line per decision, with
+letters unique across the list.
+
+```text
+<Captain name>
+- A: <code> hit problem <p>, which happens when <h>. We could fix it in these ways: 1) <x>; 2) <y>; 3) <z>. Recommendation: <x> because <why>. A1 to take recommendation.
+- B: …
+```
+
+The recommendation is always option 1. "do it" takes every recommendation in the last
+list; a named option ("A2") takes that option instead. `<code>` is the issue, PR or thread
+the decision is about. An ask that cannot be put this way is not ready to send.
+
+**When the owner has to do something** (create a token, approve a deployment, accept an
+invite, change a setting), the line carries the exact link to the page where it happens, a
+full URL and never a menu path like "Settings → Tokens", then numbered steps in the
+simplest words: what to click, what to type, what to name it, and the one word to reply
+when it is done. A page inside the Capy app is the one exception, because it has no stable
+link: name the exact path and field instead ("Settings → Integrations → Slack, the Channel
+field").
+
+```text
+<Captain name>
+- A: <code> needs you to <action>, because <why>. Open <exact URL>, then:
+  1. Click <button>.
+  2. Type <value> in <field> and name it <name>.
+  3. Reply **done**.
+```
+
 ## The digest
 
 `DIGEST.md` is rewritten every controller turn: **Needs you** (decisions only the owner
-can make, each with its one-word default; empty is the goal), **New** (what landed or
+can make, in [the ask format](#the-ask-format); empty is the goal), **New** (what landed or
 changed, newest first), **In progress** (every lane, what it owns, its state, the age of
-its last report). Ages turn stalls into the controller's next action.
+its last report). Ages turn stalls into the controller's next action. When the controller
+archives a thread, it drops that thread from **In progress** in the same turn.
 
 ## The daily flaky pass
 

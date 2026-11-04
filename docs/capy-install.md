@@ -42,7 +42,10 @@ no host profile, so a workflow started there is refused (`INSTALL: fail verdict
 — … (review-voice certifies only the read-only helpers); fix: run
 GSTACK_CAPY_ROOT=<root> bash <root>/capy/skill/gstack/scripts/install.sh --for
 <skill> …`). A review-voice check never replaces an ok verdict that a fuller
-install wrote for the same HEAD and project. The reverse is an in-place
+install wrote for the same HEAD and project. Nor does one run from another
+project shadow the session's own verdict: when the verdict for the current
+project is a review-voice one, admission reads the session's launched
+`GSTACK_INSTALL_VERDICT` instead (GST-1161). The reverse is an in-place
 upgrade: a reviewer later asked to run a workflow runs the same installer
 `--for <skill>`, which reuses the checkout (`upgrading the review-voice
 install in place to --for <skill> (same checkout ...; no second clone)`),
@@ -184,7 +187,7 @@ run from inside a workflow (/ship's docs step running `install.sh --for
 document-release`, #3571) prints `SELF_UPGRADE: skipped (a gstack run in this
 session holds a workflow lease on this installation: ... (UPGRADE_BUSY))`,
 leaves the checkout where the run started and stays ok with `behind=`. Each
-`gstack-skill-start` renews the lease. On Capy the leased pid is the machine's
+`gstack-skill-start` renews the lease and records its `SESSION_ID` as an open run; `gstack-skill-end` closes that run, and a lease whose runs are all closed is idle and blocks nothing, so a finished /ship no longer holds the upgrade back (GST-1205). Each run counts for 120 minutes from its own start, whatever other sessions renew. A lease with no recorded run (written without `--run`, or by an older gstack) counts as before. On Capy the leased pid is the machine's
 long-lived `capy-server`, so the deferral ends when the lease turns 120
 minutes old, not when the process exits. Every session on the machine runs
 under that same `capy-server`, so `bin/gstack-upgrade` run by hand also
@@ -228,7 +231,7 @@ identities, a taker stalled over 2 minutes between its `mkdir` and its owner
 rename can be broken and then publish into its successor's lock. While a live process
 holds the lock, or it cannot be taken at all, `touch` exits 3 without writing
 (`gstack-skill-start` reports that the session holds no lease) and a reclaim
-keeps the lease. `bin/gstack-lease list` shows `alive|dead|stale`, and
+keeps the lease. `bin/gstack-lease list` shows `alive|idle|dead|stale`, and
 `GSTACK_UPGRADE_FORCE=1` overrides.
 
 ## What the installer does
@@ -327,7 +330,19 @@ keeps the lease. `bin/gstack-lease list` shows `alive|dead|stale`, and
    the installer prints `the install verdict at <file> keeps for=<old> and adds
    <new> (for=<list>)`, and the trailer still names this run's workflow). A
    failing run, a new HEAD or another Bun replaces the verdict, and so does any
-   workflow install over a review-voice verdict. Admission refuses a workflow whose
+   workflow install over a review-voice verdict. Each workflow install (and
+   `--check`) also writes that workflow's own verdict beside it, at
+   `<verdict>.for/<workflow>.json`, with only this run's result. When the shared
+   verdict does not admit a workflow, admission and the pregate try the
+   workflow's own record with the same checks, so a later install for another
+   workflow on a shared machine (a /ship docs child resolving another Bun, or a
+   failed child install) never drops /ship's admission (GST-1233). A new HEAD
+   still invalidates both, and a failed `./setup` (`gstack: fail setup`)
+   invalidates every workflow's record. `--check --for <workflow>` keeps the
+   Bun that workflow's own record holds. The launch file and launch directory
+   stay shared per checkout and project (GST-1239), so the pregate launches
+   from the recorded Bun's own directory when the launch directory's `bun`
+   resolves to another one. Admission refuses a workflow whose
    running Bun is not the one the verdict recorded
    ([BUN_RESOLUTION_DRIFT](troubleshooting.md#bun-resolution-drift)), and so
    do the pregate's lanes and guards, which also refuse an invalid verdict

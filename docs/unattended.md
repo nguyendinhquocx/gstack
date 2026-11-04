@@ -87,7 +87,7 @@ Not every workflow writes this line or a run directory today:
 - **`/ship`** ends with `gstack-ship-receipt result --pr <n>` (or `--body
   .gstack/tmp/ship-receipt.md` after the handoff section), which binds the
   receipt to the branch head, writes the run record and prints
-  `GSTACK_RESULT: skill=ship status=complete run=<dir>`. That line and that
+  `GSTACK_RESULT: skill=ship status=complete head=<sha> run=<dir>`. That line and that
   record are the machine-readable READY evidence; [What /ship leaves for a
   parent](#ship-evidence) below is the whole contract (the refused and
   incomplete lines, the one publication an unattended run may make, the
@@ -131,7 +131,7 @@ in the PR body (or the handoff file) to HEAD, writes
 `<state root>/ship/runs/<utc>-<head12>/` and prints the terminal line:
 
 ```
-GSTACK_RESULT: skill=ship status=complete run=<dir>
+GSTACK_RESULT: skill=ship status=complete head=<sha> run=<dir>
 ```
 
 The run directory holds `ship-receipt.md` (the block, copied) and
@@ -216,8 +216,9 @@ review-log row is the same row every Step 11 pass writes
 (the outside provider that reviewed, with the model recorded, for the
 cross-family subagent; `codex` for completed Codex CLI output, as
 `ship/sections/adversarial.md` prescribes),
-`outside_provider` (the provider the host would have used, as the generated
-prose names it), `outside_status` (`completed` for a finished outside pass;
+`outside_provider` (on Capy, `host-subagent`, with `outside_model`, both copied
+from the pass program's `OUTSIDE_RECORD:` line; elsewhere the provider the
+generated prose names), `outside_status` (`completed` for a finished outside pass;
 `unavailable` when neither the CLI nor a subagent completed, the cause on the
 `gstack-outside-voice run:` stderr line and in `<out>.meta.json` rather than
 in the row; `disabled` under
@@ -237,7 +238,16 @@ when `input.models['outside-voice']` is empty and the lane model is
 rounds ran. Any other lane must name a model. An outside voice from the same
 provider as the lane model or the native voice stops the pass (`STOP:`) before
 either voice is created, including on a rerun, and each outside voice prints an
-`OUTSIDE_VOICE:` line saying whether it is the certified configuration.
+`OUTSIDE_VOICE:` line saying whether it is the certified configuration. An
+outside voice still running with no output after `input.stuckMs` (20 minutes by
+default) is stopped, and one that stops or fails without leaving findings, or
+finishes empty, is collected as unavailable coverage (`COLLECT_UNAVAILABLE:`)
+instead of stopping the pass, so Step 11 goes on to judge the native voice. A
+stopped or failed outside voice whose reply holds findings is collected like any
+finished one, so its findings are kept; one whose reply holds none is unavailable. That outside voice then gets its own
+row (`source: "host-subagent"`, `status: "unavailable"`, `completed` and
+`converged` false, written without `--finish` before the native row), so a
+missing voice never reads as converged or as an unavailable Codex CLI.
 
 ### The carry across a base merge or a test-only fix
 
@@ -245,7 +255,7 @@ When the parent merges the base in or fixes a test after the receipt was
 written, it runs `gstack-ship-receipt carry --pr <n> --base <base> --dry-run`
 instead of another /ship; on `CARRY: would carry` it runs `gstack-pregate` at HEAD
 and reruns carry with `--pregate .gstack/tmp/pregate.json`. `CARRY: carried from <old> to <new> (<reason>)` plus the
-`GSTACK_RESULT: skill=ship status=complete run=<dir>` line means the receipt
+`GSTACK_RESULT: skill=ship status=complete head=<sha> run=<dir>` line means the receipt
 now names HEAD with a `carry` object holding the `git range-diff` evidence, and
 `ship-run.json` gains `carried_from` and `carry_reason`; the `review_loop`
 counters are kept, because the reviewed product diff is unchanged or its only
@@ -375,9 +385,17 @@ The example above is the full run. The first `next` also takes `--kind`:
   hashed into `run.json` (`phases.eng.draft`) and the `phase_opened` journal
   row. With no code yet, the run says so: `DRAFT: none (<why>)`. A git
   command that fails is `DRAFT: none (draft capture failed: …)`, never a
-  partial draft. An untracked file whose name looks like a secret (`.env*`,
-  `*.pem`, `*.key`, `id_rsa`, `credentials*`, `*secret*`) is left out with a
-  note, and the `DRAFT:` line names the checkout it diffed (`root=`). The prompt inlines the diff in a fence longer than any tilde
+  partial draft. The draft goes to a model provider, so a file whose name
+  looks like a secret (the whole `.env*` family, `.envrc` included, `*.pem`,
+  `*.key`, `*.p12`, `id_rsa` and the other SSH private keys, `.netrc`,
+  `.npmrc`, `.pgpass`, `*credentials*`, `*secret*`) is never read, tracked or
+  untracked, and is left out with a note; so is either side of a rename or
+  copy git detects in the branch's commits or staged changes. A secret moved
+  without `git add`, copied unchanged, or renamed and heavily edited reaches
+  the draft under its new name, guarded only by the content check. Every other file's patch goes
+  through the redact engine (`lib/redact-engine.ts`), so a key in an ordinary
+  file reaches the reviewer as `<REDACTED-…>`; a patch it can't redact safely
+  is left out with a note. The `DRAFT:` line names the checkout it diffed (`root=`). The prompt inlines the diff in a fence longer than any tilde
   run inside it, cut at 100,000 bytes (`shown=` on the `DRAFT:` line) with a
   note asking the reviewer to name what it didn't see. The reviewer's
   line after INPUT names the draft (`DRAFT: <sha256>` or `DRAFT: none`), or
@@ -883,15 +901,19 @@ decision or action, every evidence pointer resolves and shows what the row
 claims, and a fork or abandoned approach that shaped the result but is not
 logged gets a row. The audit corrects the log, never the story: no row is
 edited or removed, an invented or wrong row stays and a new row supersedes it
-with what actually happened. Then a reviewer on a different model family from
-the one that did the work (a Capy subagent on another family, or the outside
-voice) reads the trail and the transcript and flags what the owner should look
-at: decisions with weak or missing evidence, verification claimed without
-proof, choices that look risky in hindsight, gaps a skim would miss. The run's
-final report ends with an `Attention` section that opens with `reviewed by
-<model>` on its own line and lists each flag against its rows; `No flags` is a
-valid body, a missing model line is not. Self-review does not stand in for
-this. `decisions.jsonl` stays the typed record `gstack-artifact` validates; the
+with what actually happened. On a risk-class PR (the receipt's `review_depth`
+has class `gate` or a `risk` class: security, money, auth, secrets, user
+data), a reviewer on a different model family from the one that did the work
+(a Capy subagent on another family, or the outside voice) then reads the trail
+and the transcript and flags what the owner should look at: decisions with
+weak or missing evidence, verification claimed without proof, choices that
+look risky in hindsight, gaps a skim would miss. Self-review does not stand in
+for that read. Every other PR skips it: the run's own audit is the review. The
+run's final report ends with an `Attention` section that opens with `reviewed
+by <model>` (risk class) or `self-audited` (every other PR) on its own line
+and lists each flag against its rows; `No flags` is a valid body, a missing
+opening line is not. `gstack-ship-queue ready` prints the stub with the right
+opening line for the receipt it bound. `decisions.jsonl` stays the typed record `gstack-artifact` validates; the
 trail is the plain one a person reads, and `column -s$'\t' -t decisions.tsv`
 renders it in a terminal.
 

@@ -587,11 +587,22 @@ describe('capy skill: factory.md, the auto-loaded "how we work" page', () => {
     return [...new Set(problems)];
   }
 
-  test('it fits the 3,300-byte budget, and every citation, heading and skill it names resolves', () => {
+  test('it fits the 3,450-byte budget, and every citation, heading and skill it names resolves', () => {
     const text = fs.readFileSync(FACTORY, 'utf8');
-    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(3300);
+    // 3,300 since #3634; raised to 3,450 (the page's new size, rounded up to the next 25 bytes) for point 12's
+    // R68 clause (Garry, 2026-11-03: crew threads ask their Captain for new threads). Raise it only by what a rule needs.
+    expect(Buffer.byteLength(text)).toBeLessThanOrEqual(3450);
     expect(text).toMatch(/^# How we work/);
     expect(citationProblems(text)).toEqual([]);
+  });
+
+  test('item 8 cites ETHOS.md principle 9, Earn Its Place, which states the fair test, the Why-null cycle and the safety exception', () => {
+    const item8 = fs.readFileSync(FACTORY, 'utf8').split('\n').find(l => l.startsWith('8. '))!;
+    expect(item8).toContain('[ETHOS.md: 9. Earn Its Place]');
+    const ethos = fs.readFileSync(path.join(REPO, 'ETHOS.md'), 'utf8');
+    const p9 = ethos.slice(ethos.indexOf('## 9. Earn Its Place'), ethos.indexOf('## How They Work Together'));
+    expect(p9.length).toBeGreaterThan(200);
+    for (const words of ['only include it if it is beneficial and good', 'claude_code', 'Opus 5.5', 'GPT-6.1 Sol', 'masked', 'Why null?', 'Safety and security guards', 'biggest', 'docs/inventory.md']) expect(p9).toContain(words);
   });
 
   test('negative controls: a missing file, a missing heading and an unknown skill are each caught', () => {

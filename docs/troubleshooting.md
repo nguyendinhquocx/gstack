@@ -146,7 +146,9 @@ record. Another successful fetch alone cannot certify corrupted history.
 
 Outside reviews send your diff, plan or question to a second AI provider. Their
 verdict comes from `lib/outside-review-result.ts`, which prints
-`VERDICT: clean|findings|unverified|unavailable`. A `findings` verdict with a
+`VERDICT: clean|findings|unverified|unavailable`. When given an events file, it
+also prints `OUTSIDE_USAGE:` with the token counters Codex reported, or
+`OUTSIDE_USAGE: unknown` when it reported none. A `findings` verdict with a
 P0 or P1 finding blocks exactly like a native P0/P1. `unverified` and
 `unavailable` are missing coverage: /ship and /review continue, show the gap in
 the readiness dashboard and the PR body, and never count it as a pass.
@@ -1703,10 +1705,12 @@ session holds a workflow lease on this installation: pid <p> (<age>m
 <checkout>/bin/gstack-upgrade once the lease is 120 minutes old, or
 GSTACK_UPGRADE_FORCE=1 <checkout>/bin/gstack-upgrade when no other session uses
 this checkout (UPGRADE_BUSY))` and leaves the
-checkout where the run started. Each `gstack-skill-start` renews the lease.
+checkout where the run started. Each `gstack-skill-start` renews the lease
+and opens a run that its `gstack-skill-end` closes; a lease whose runs are all
+closed is idle and never counts (GST-1205).
 
 **Fix.** Wait for those sessions to finish (`bin/gstack-lease list` shows
-every lease with its age and `alive|dead|stale`; a holder is named as
+every lease with its age and `alive|idle|dead|stale`; a holder is named as
 `pid <p> (<age>m <command>)`), then re-run `bin/gstack-upgrade`. For the
 session's own run, or a shared-harness lease, re-run once the lease is 120
 minutes old. When you know no other session uses the checkout, `GSTACK_UPGRADE_FORCE=1 bin/gstack-upgrade`
@@ -2087,8 +2091,8 @@ browse chain 'goto https://example.com | text'
 <a id="browse-chromium-path-failed"></a>
 ### `Chromium at GSTACK_CHROMIUM_PATH=<path> failed to launch: ...`
 
-**Meaning.** Headless browse and make-pdf now use `GSTACK_CHROMIUM_PATH`
-(NixOS, macOS 13). That binary could not start.
+**Meaning.** Headless browse, headed browse, `browse handoff` and make-pdf use
+`GSTACK_CHROMIUM_PATH` (NixOS, macOS 13). That binary could not start.
 
 **Fix.** Point `GSTACK_CHROMIUM_PATH` at a working Chromium, or
 `unset GSTACK_CHROMIUM_PATH` to use gstack's bundled one.
@@ -3338,10 +3342,13 @@ targeted refusal, run the targeted reader on HEAD, `gstack-review-dispatch verif
 use this code when the receipt's review_exclude digest (or the
 `--review-exclude <digest>` write was given) is not the digest HEAD has under the
 base policy's [`review_exclude_paths`](ship-policy.md#review-exclude-paths). The line
-names `expected=` (now), `recorded=` (what the review read, `none` when it read
-without exclusion) and `source=` (the base commit). The reviewers read another
-selection than the one the head now has, so a receipt write alone cannot clear
-it: rerun `/ship`'s review on the head (`gstack-review-dispatch pass --base <base>`),
+names `expected=` (now), `recorded=` (the `--review-exclude` argument, or the digest
+the receipt recorded from it; `none` without one) and `source=` (the base commit).
+A mismatch proves only that this argument differs from the selection the head has
+now. Write compares the argument and does not read the review ledger, so the line
+says nothing about what the readers read, and a write that passes the `expected=` digest clears
+the field without a review. Do not do that. Rerun
+`/ship`'s review on the head (`gstack-review-dispatch pass --base <base>`),
 run `gstack-review-dispatch verify --ledger <ledger>`, which prints
 `REVIEW_EXCLUDE_RECORD: digest=<d>` from the briefs the readers got, then
 `gstack-ship-receipt write --pr <n> --review-exclude <d> --body <body>`.
@@ -3728,6 +3735,23 @@ the entry is reported as unverified, not `REGEN_STALE`.
 **Fix.** Run the printed install command (`bun install`, or the one matching the
 repository's lockfile), then rerun `gstack-regen check` or the pre-gate.
 
+<a id="pregate-gstack-too-old"></a>
+### `PREGATE_GSTACK_TOO_OLD`
+
+**Meaning.** `.gstack/pregate.json` uses a key this gstack does not know, and
+the same tree's `.gstack/ship-policy.json` sets `min_gstack_version` above this
+gstack. The key belongs to a newer gstack (one a later release adds), so the
+line reads `needs gstack >= <version>; upgrade`. The policy still refuses,
+exactly as `PREGATE_CONFIG_INVALID` would. Only a gstack that has this check
+prints it; one released before it (1.94.0.0 included) reports the same key as
+`PREGATE_CONFIG_INVALID`.
+
+**Fix.** Upgrade gstack on this machine to at least the version named
+(`bin/gstack-upgrade`, or the session install with `--for <skill>`), then
+rerun. A repo adopting a new key raises `min_gstack_version` first, so an older
+gstack that has this check prints this instead of a generic invalid-config
+error.
+
 <a id="pregate-config-invalid"></a>
 ### `PREGATE_CONFIG_INVALID`
 
@@ -3765,7 +3789,9 @@ anchored pattern and a reason ([docs/pregate.md](pregate.md#allowlist));
 ### `PREGATE_STRAYS`
 
 **Meaning.** A file was added at the repository root, in a new top-level
-directory, or under a scratch name (`zz-*`, `tmp*`, `scratch*`).
+directory, or under a scratch name (`zz-*`, `tmp*`, `scratch*`) or an editor
+leftover name (`*.orig`, `*.rej`, `*.swp`, `*.swo`, `*.bak`, `*.tmp`, `*~`,
+`.DS_Store`, `Thumbs.db`).
 
 **Fix.** Delete or move it. An intentional root file goes in `strays.allow`.
 
@@ -4139,15 +4165,17 @@ refuses to start without a passing check.
 
 **Meaning.** The preregistration says `stack: loaded` (some arm loads gstack or
 another skill stack) and its `## No-gstack arm` section is missing, lacks one
-of `arms:`, `inputs:`, `prompt:`, `panel:` or `report:`, lists an arm that
+of `arms:`, `inputs:`, `prompt:`, `panel:`, `report:`, `masking:`, `install:`
+or `audit:` (or says `none` for one of the last three), lists an arm that
 is not a `<model>#no-gstack` Arms line, or leaves a model in the comparison
 without its own no-gstack arm. Arms match on whole identities, so
 `claude-opus-5#no-gstack` does not cover `claude-opus-5-5`.
 
 **Fix.** Add one `<model>#no-gstack` line per model under `## Arms`, list them
-on the `arms:` line, and fill the other four keys: the same inputs, a plain
-prompt with no skill text, the same panel and judge, and where the result row
-goes beside the variants. When no arm loads a skill stack, write
+on the `arms:` line, and fill the other keys: the same inputs, a plain
+prompt with no skill text, the same panel and judge, where the result row
+goes beside the variants, how the run agent is masked from the Capy drives,
+the check that no gstack is installed, and the per-arm drive-read audit. When no arm loads a skill stack, write
 `stack: none` with a `why:` line instead. The rule is in
 [docs/TESTING_INTERNALS.md](TESTING_INTERNALS.md#no-gstack-arm).
 
@@ -5045,6 +5073,59 @@ the two allowed restamps, so `land` stopped instead of restamping again.
 it), then rerun `gstack-ship-queue land --pr <n>`; the lock was released and
 the rerun restamps from the pin.
 
+<a id="queue-land-stamped"></a>
+### `QUEUE_LAND_STAMPED`
+
+**Meaning.** Under `merge: direct`, the PR changes VERSION, the
+`package.json` version or the CHANGELOG. Versions and the CHANGELOG are set at
+release, so a PR carries only its `changelog.d` fragment. Nothing was merged.
+
+**Fix.** The lane runs the command the refusal prints, for example
+`git checkout $(git merge-base origin/main HEAD) -- VERSION CHANGELOG.md`
+(and sets the `package.json` version back by hand when it's named), keeps or
+adds the fragment with the entry text, commits, then runs /ship and
+`gstack-ship-queue ready --pr <n> --no-screen` at the new head.
+
+<a id="queue-land-pin-moved"></a>
+### `QUEUE_LAND_PIN_MOVED`
+
+**Meaning.** The PR head isn't the pin `land --pin` was given, so the READY
+doesn't describe what would merge. Nothing was merged.
+
+**Fix.** The lane runs /ship and `ready --pr <n> --no-screen` at the new head
+and sends a new READY; land that pin.
+
+<a id="queue-land-checks"></a>
+### `QUEUE_LAND_CHECKS`
+
+**Meaning.** A check at the pin is red or pending, or a required check never
+ran there. Nothing was merged.
+
+**Fix.** Pending: `gstack-pr-wait <n> --until green`, then rerun land. Red:
+the lane fixes it at a new head (a flaky case gets its one rerun under rule
+16). Missing: dispatch that workflow on the branch, then rerun land.
+
+<a id="queue-land-not-clean"></a>
+### `QUEUE_LAND_NOT_CLEAN`
+
+**Meaning.** GitHub doesn't report the PR `MERGEABLE` and `CLEAN`. Nothing
+was merged.
+
+**Fix.** `CONFLICTING`: the lane merges the base into its branch, resolves,
+runs /ship and `ready` at the new head. `UNKNOWN`: GitHub is still
+computing, so rerun land in a minute. `BLOCKED` or `BEHIND`: meet the branch
+rule it names.
+
+<a id="queue-land-unverified"></a>
+### `QUEUE_LAND_UNVERIFIED`
+
+**Meaning.** GitHub merged the PR, but the base branch's merge commit tree
+isn't the pin merged onto that commit's parent, so something besides the
+reviewed pin reached main. No land note was written.
+
+**Fix.** Compare the merge commit with `git merge-tree --write-tree <parent>
+<pin>`, revert what doesn't belong to the PR, and report it to the Captain.
+
 <a id="queue-train-stamp-mismatch"></a>
 ### `QUEUE_TRAIN_STAMP_MISMATCH`
 
@@ -5681,7 +5762,8 @@ closed PRs.
 verdict is read from the run itself, never from a lane's report: the
 `gate-binding-a<attempt>` artifact evals.yml's report job uploads (verdict,
 reconcile exit, flaky cases) and the `report-verdict-a<attempt>` artifact's
-`collector-outcomes.json` (the panels that failed the lane and the rule-16
+`collector-outcomes.json` (the panels that failed the lane, the report's `✗`
+failure lines, which name rule cases that have no panel, and the rule-16
 flaky lines). A case the binding calls red already failed twice inside the
 run (rule 16 reruns a first failure once), so the red is real. `ready`
 refuses with this code when the head's recorded screen run is red, whichever
@@ -5979,7 +6061,10 @@ the reviewed tree but the base moved under it, so the diff a reviewer would see
 is not the reviewed one. For a stacked PR retargeted to the base after its
 parent landed, it means HEAD's product diff against the base is not the range
 reviewed against the parent branch: the parent has not fully landed, or the
-branch changed since. The reviewed verdict does not cover HEAD, so the
+branch changed since. A stacked PR whose receipt was written against the base
+carries from the newest reviewed commit the base already holds
+([ship-policy.md](ship-policy.md#receipt-carry)); it refuses here only when no
+such commit exists or the branch changed since. The reviewed verdict does not cover HEAD, so the
 receipt is not carried. The refusal names the changed product paths, or for a
 retargeted stacked PR the parent branch and the base.
 
@@ -5987,8 +6072,12 @@ retargeted stacked PR the parent branch and the base.
 conflict-only base merge, a test-only change, release metadata, a registered
 output the pregate's regen check proved, a rebase onto a covered tree with
 the recorded product diff, a stacked PR's retarget once its parent fully
-landed on the base, or base context next to unchanged hunks after a clean
-scoped review ([`RECEIPT_CARRY_SCOPED_REVIEW`](#receipt-carry-scoped-review)), which the
+landed on the base, a stamp on the branch's own rows in a stamp file it also
+changed as product (every changed line at a branch-added position, the mode
+unchanged, the base not touching the file), a stamp file the branch changes by
+no more than a stamp against each head's base (a changelog-fragment conversion
+that puts `package.json` back at the base's content), or base context next to unchanged
+hunks after a clean scoped review ([`RECEIPT_CARRY_SCOPED_REVIEW`](#receipt-carry-scoped-review)), which the
 `carry` object in the carried receipt records with the product patch-id and
 the range-diff evidence ([unattended.md](unattended.md#the-terminal-line)).
 
@@ -6002,7 +6091,12 @@ hunk). The merge may have spliced the two, as in a JSON entry where the branch
 changed one key and the base the next, so the receipt does not carry silently.
 The refusal names the paths and a packet file with the hunks that differ and
 the base's own change. The same lines moved somewhere else are
-`RECEIPT_CARRY_PRODUCT_CHANGED`, not this code.
+`RECEIPT_CARRY_PRODUCT_CHANGED`, not this code. A packet section over 200
+lines takes the full loop instead, but only the branch's own lines count toward
+that limit: the base's +/- lines, already merged at base, are shown and not
+counted (GST-1226), so a large base edit next to the branch's hunk still gets
+the scoped read. A base change over 2,000 lines in one file counts in full
+again and takes the full loop.
 
 **Fix.** Dispatch one fix-check reviewer
 ([review-policy.md](review-policy.md)) on the packet. When it comes back clean,
@@ -6020,6 +6114,30 @@ written (an unwritable `.git`) is a STOP or `RECEIPT_CARRY_REFUSED` naming the p
 none of carry's other checks would refuse; carry without `--dry-run` writes it.
 In /ship Step 1, `gstack-ship-preflight` prints the route as `NEXT: carry
 route (Step 1.4)`.
+
+<a id="receipt-carry-recheck"></a>
+### Scoped re-check after `RECEIPT_CARRY_PRODUCT_CHANGED` (J1)
+
+**Meaning.** The product diff changed since the receipt's head, so the receipt
+can't carry as it is. When the history is linear, the base is the one the
+receipt was reviewed against, and `git range-diff` of the reviewed range
+against the current one is at most 400 lines (`RECHECK_RANGE_DIFF_CAP` in
+`lib/ship-recheck.ts`), carry also prints `RECHECK: eligible
+range_diff_lines=N range_diff_sha256=<sha> packet=<file>`: one reader on that
+range-diff can clear it instead of a full second /ship. A rebased branch
+(`RECEIPT_CARRY_TREE_MISMATCH`), a retargeted stack, a receipt with no
+`review_depth`, more than 20 changed product paths, a binary path, base
+context moved next to reviewed hunks, an empty or unreadable range-diff and a
+packet over 400 lines or 64 KB print `RECHECK: not eligible (<why>)` instead.
+
+**Fix.** Dispatch one reader on the packet (`.git/gstack/recheck-<head12>.md`;
+`--dry-run` writes none). When it comes back clean, write
+`{"from":"<reviewed head>","head":"<HEAD>","range_diff_sha256":"<from the RECHECK line>","reader":"<model>","verdict":"clean"}`
+and rerun `gstack-ship-receipt carry ... --recheck <record.json>`. The carry
+reason records the reader and the range-diff size. Carry still refuses when
+HEAD needs a deeper review depth or a different risk class than the receipt
+recorded; that, or a blocking finding, means /ship on the new head. In /ship
+Step 1, `gstack-ship-preflight` prints this as `NEXT: carry route (Step 1.4, J1)`.
 
 <a id="receipt-prose-mismatch"></a>
 ### `RECEIPT_PROSE_MISMATCH`
@@ -6441,7 +6559,7 @@ There is no ledger for that harness or id under `$GSTACK_STATE_ROOT/harness`. `g
 <a id="harness-hook-unsupported"></a>
 ### `gstack-harness: <harness> has no start hook` / `the start hook goes into the <harness> profile <dir>, and this registration uses another skills folder` (HARNESS_HOOK_UNSUPPORTED)
 
-The [start hook](hosts.md#start-hook) exists for OpenClaw and Hermes only, and it goes into the harness profile's own plugin folder, the one the harness scans. A registration with `--skills-dir` somewhere else has no profile gstack can trust, and with `OPENCLAW_CONFIG_PATH` set OpenClaw reads a config outside the profile, where gstack's settings change would not land, so `--start-hook` is refused and nothing is written. Register without `--skills-dir` (set `OPENCLAW_STATE_DIR` or `HERMES_HOME` to pick the profile), or drop `--start-hook`. When the choice comes from `GSTACK_HARNESS_START_HOOK` or `harness_start_hook` instead of the flag, such a registration just gets no hook, and its receipt says so.
+The [start hook](hosts.md#start-hook) exists for OpenClaw and Hermes only, and it goes into the harness profile's own plugin folder, the one the harness scans. A registration with `--skills-dir` somewhere else has no profile gstack can trust, and with `OPENCLAW_CONFIG_PATH` naming another config OpenClaw reads settings outside the profile, where gstack's settings change would not land, so `--start-hook` is refused and nothing is written. `OPENCLAW_CONFIG_PATH` naming the profile's own `openclaw.json` (compared after resolving symlinks) is not refused. Register without `--skills-dir` (set `OPENCLAW_STATE_DIR` or `HERMES_HOME` to pick the profile), unset `OPENCLAW_CONFIG_PATH` or point it at the profile's own `openclaw.json`, or drop `--start-hook`. When the choice comes from `GSTACK_HARNESS_START_HOOK` or `harness_start_hook` instead of the flag, the registration gets no hook, and `gstack-harness register` and `./setup --host` exit 4 with the reason (`HARNESS_HOOK_INACTIVE`, `start hook is off`); refreshes only print it.
 
 <a id="harness-hook-choice-invalid"></a>
 ### `gstack-harness: GSTACK_HARNESS_START_HOOK="<value>" is not on or off` (HARNESS_HOOK_CHOICE_INVALID)
@@ -6456,7 +6574,9 @@ Each harness profile has one start hook, owned by the gstack registration that w
 <a id="harness-hook-inactive"></a>
 ### `gstack-harness: <harness> start hook is written: <why>. Turn it on: <command>` (HARNESS_HOOK_INACTIVE, exit 4)
 
-The skills are registered and the start hook's files are in place, but the hook is not active in the harness. gstack turns the hook on through the harness's own CLI and then reads it back, so this means the CLI was not on `PATH`, one of its commands failed or timed out (the message quotes its last output), or the harness's settings block the plugin: OpenClaw's `plugins.allow` set without `gstack-start`, `gstack-start` in `plugins.deny`, or `hooks.allowPromptInjection: false`. gstack never edits your allow or deny lists. Run the printed command, then `gstack-harness status`; `--start-hook` again retries the whole step. `./setup --host` exits 4 for the same reason. Refreshes and upgrades retry on their own without failing, and stop once you disable the plugin in the harness.
+The skills are registered and the start hook's files are in place, but the hook is not active in the harness. gstack turns the hook on through the harness's own CLI and then reads it back, so this means the harness has no config yet (`no OpenClaw config at <path> yet` or `no Hermes config at <path> yet`: run `openclaw onboard` or `hermes setup` first, then `gstack-harness refresh`; gstack runs no harness command until then, because the CLI would create a config holding only gstack's plugin setting), the CLI was not on `PATH`, one of its commands failed or timed out (the message quotes its last output), or the harness's settings block the plugin: OpenClaw's `plugins.allow` set without `gstack-start`, `gstack-start` in `plugins.deny`, or `hooks.allowPromptInjection: false`. gstack never edits your allow or deny lists. Run the printed command, then `gstack-harness status`; `--start-hook` again retries the whole step. `./setup --host` exits 4 for the same reason. Refreshes and upgrades retry on their own without failing, and stop once you disable the plugin in the harness.
+
+The same code with `start hook is off: <why>` means you asked for the hook through `GSTACK_HARNESS_START_HOOK` or `harness_start_hook` but this registration cannot take it (a custom `--skills-dir`, `OPENCLAW_CONFIG_PATH` naming another config, or an unsafe plugin folder); the message names the fix.
 
 <a id="harness-qm-credentials"></a>
 ### `gstack-harness: no QM admin credential in the environment` / `... needs --yes` (HARNESS_QM_CREDENTIALS)

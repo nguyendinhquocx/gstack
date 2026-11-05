@@ -24,7 +24,8 @@ export interface OutsideReviewInput {
 
 export interface OutsideReviewClassification {
   execution: { state: 'ran' } | { state: 'unavailable'; reason: GateReason; detail?: string };
-  findings: { highest: Severity | null };
+  /** unlabeled: numbered findings with no readable severity, in a reply with a `Verdict:` line; set only when non-zero. */
+  findings: { highest: Severity | null; unlabeled?: number };
   verdict: OutsideVerdict;
   /** Set for every verdict except clean/findings. */
   reason?: GateReason;
@@ -192,6 +193,15 @@ function plainReview(text: string): string {
 }
 
 /**
+ * A `## Recommendation` heading and the prose line under it are the same marker as an inline `Recommendation:` line (#3980).
+ * Only the completion check and the no-findings conclusion read this view: a `P1:` or `Verdict:` line under the heading stays
+ * at line start for the severity and verdict parsers.
+ */
+function recommendationHeading(text: string): string {
+  return text.replace(/^[\t ]*#{1,6}[\t ]+Recommendation[\t ]*:?[\t ]*\r?\n(?:[\t ]*\r?\n)*(?![\t ]*(?:[#>]|[-+*][\t ]))(?=[^\r\n]*\bbecause\b)[\t ]*(\S[^\r\n]*)/gim, 'Recommendation: $1');
+}
+
+/**
  * Code quotes text, so a severity inside a fence or an inline code span is not
  * a label. An inline span holding only a severity token in label position
  * (`- \`P1\`: x`, `Severity: \`High\``, a table cell) is formatting and stays.
@@ -249,21 +259,30 @@ function firstUnparsed(text: string): string | undefined {
   return at < 0 ? undefined : `line ${at + 1}: "${lines[at]!.trim().slice(0, 160)}"`;
 }
 
-/** The reply's last `Verdict:` line says it is not ready. */
-function verdictNotReady(plain: string): boolean {
-  const last = [...plain.matchAll(/^[\t ]*Verdict[\t ]*:[\t ]*([^\r\n]*)$/gim)].at(-1)?.[1];
-  return last !== undefined && /^not[\t ]+ready\b/i.test(last.trim());
+/** The value of the reply's last `Verdict:` line, or undefined when it has none. */
+function lastVerdict(plain: string): string | undefined {
+  return [...plain.matchAll(/^[\t ]*Verdict[\t ]*:[\t ]*([^\r\n]*)$/gim)].at(-1)?.[1]!.trim();
 }
+/** A verdict that approves the change; the exact NO_FINDINGS token (its underscore is gone after plainReview) is clean too. */
+const READY_VERDICT = /^(?:ready|lgtm|approved?|ship(?:[\t ]+it)?|pass(?:ed)?|clean|good to (?:go|merge|ship))\b(?![-?/])/i;
+/** A verdict that says the reviewer could not check, run or see something is never a ready one (#3925). */
+const UNVERIFIED_CLAIM = /\b(?:can['\u2019]?t|cannot|can not|couldn['\u2019]t|could not|unable to|not able to|did not|didn['\u2019]t)\s+(?:be\s+)?(?:verif|run|test|check|open|read|review|execut)|\bunverifi|\bnot (?:yet|until)\b|\bnot (?:been )?(?:verified|run|tested|checked|reviewed|executed)\b|\b(?:excluded|blocked|skipped)\b/i;
+/** A numbered item at the start of a line; in a reply with a `Verdict:` line it is a finding (#3925). */
+const NUMBERED_ITEM = /^(?:\*\*|__)?\(?\d{1,3}[.)][\t ]+\S.*$/gm;
 
 export function classifyOutsideReview(input: OutsideReviewInput): OutsideReviewClassification {
   const plain = plainReview(input.text);
   const reviewed = input.gate !== 'proposal';
   const code = withoutCode(input.text), plainCode = plainReview(code);
   const read = withoutCode(input.text, true), plainRead = plainReview(read);
+  const marked = recommendationHeading(code);
   const levelsOf = (c: string, p: string) => [...[...p.matchAll(/\[(P[0-3])\]|^(P[0-3]):/gm)].map(m => (m[1] ?? m[2]) as Severity),
     ...severityTokens(c), ...(reviewed ? severityWords(c) : [])];
   const levels = levelsOf(read, plainRead);
-  const findings = { highest: levels.length ? levels.sort()[0]! : null };
+  const verdicts = [lastVerdict(plainCode), lastVerdict(plainRead)];
+  const unlabeled = reviewed && verdicts[1] !== undefined && !concludesNoFindings(marked)
+    ? [...read.matchAll(NUMBERED_ITEM)].filter(m => !levelsOf(m[0], plainReview(m[0])).length).length : 0;
+  const findings = { highest: levels.length ? levels.sort()[0]! : null, ...(unlabeled ? { unlabeled } : {}) };
   const cleanEvidence = levelsOf(code, plainCode).length > 0;
   const ran = execution(input);
   if (ran.state === 'unavailable') return { execution: ran, findings, verdict: 'unavailable', reason: ran.reason, detail: ran.detail };
@@ -277,19 +296,26 @@ export function classifyOutsideReview(input: OutsideReviewInput): OutsideReviewC
     const score = Number(scores[0]![1]);
     return { ...result(score >= 7 ? 'clean' : 'findings'), score };
   }
-  if ((input.gate === 'review' || input.gate === 'proposal') && !/^Recommendation:[\t ]*[^\r\n]+\bbecause\b[\t ]*\S[^\r\n]+$/im.test(plain)) {
+  if ((input.gate === 'review' || input.gate === 'proposal') && ![plain, plainReview(marked)].some(text => /^Recommendation:[\t ]*[^\r\n]+\bbecause\b[\t ]*\S[^\r\n]+$/im.test(text))) {
     return result('unavailable', 'missing_markers', 'missing review completion recommendation');
   }
   if (!reviewed) return result(blocking ? 'findings' : 'clean');
   const unparsed = firstUnparsed(read);
   // A last explicit not-ready blocks even when the only parsed severities are advisory.
-  const notReady = verdictNotReady(plainCode) || verdictNotReady(plainRead);
+  const notReady = verdicts.some(v => v !== undefined && /^not[\t ]+ready\b/i.test(v));
   if (blocking || notReady) return { ...result('findings'), ...(unparsed ? { unparsed } : {}) };
   if (unparsed) return { ...result('unverified', 'unparsed_severity', unparsed), unparsed };
-  if ((input.gate === 'structured' || input.gate === 'review') && !cleanEvidence && !concludesNoFindings(code)) {
+  const unready = verdicts.find(v => v !== undefined && !/^NO_?FINDINGS$/.test(v) && (!READY_VERDICT.test(v) || v.includes('?') || UNVERIFIED_CLAIM.test(v)));
+  if (unready !== undefined) return result('unverified', 'unverified_verdict', `Verdict: ${unready}`.trim().slice(0, 160));
+  if ((input.gate === 'structured' || input.gate === 'review') && !cleanEvidence && !concludesNoFindings(marked)) {
     return result('unverified', 'untagged_review', 'missing severity or explicit no-findings conclusion');
   }
   return result('clean');
+}
+
+/** The FINDINGS: value: the highest severity, `unspecified` when findings carry none, else `none`. */
+export function findingsLabel(checked: OutsideReviewClassification): string {
+  return checked.findings.highest ?? (checked.verdict === 'findings' || checked.findings.unlabeled ? 'unspecified' : 'none');
 }
 
 const LEGACY_REASONS: Partial<Record<GateReason, string>> = {
@@ -388,7 +414,7 @@ if (import.meta.main) {
   const checked = classifyOutsideReview({ text, gate: gate as OutsideGate, exit, stderr: await readOptional(flags['--stderr']), events });
   const label = flags['--label'] ?? 'Outside review';
   console.log(`VERDICT: ${checked.verdict}`);
-  console.log(`FINDINGS: ${checked.findings.highest ?? (checked.verdict === 'findings' ? 'unspecified' : 'none')}`);
+  console.log(`FINDINGS: ${findingsLabel(checked)}`);
   if (checked.unparsed) console.log(`UNPARSED: ${checked.unparsed}`);
   if (flags['--events'] !== undefined) console.log(formatUsageLine(usageFromEvents(events)));
   if (checked.reason) {

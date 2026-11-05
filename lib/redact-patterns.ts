@@ -167,8 +167,34 @@ function looksLikeWallet(span: string): boolean {
     const body = span.slice(2).toLowerCase();
     return !/^(.)\1{39}$/.test(body);
   }
-  // bech32 / base58 — length sanity only
+  if (span.startsWith("bc1")) return bech32ChecksumValid(span);
+  // base58 — length sanity only
   return span.length >= 26 && span.length <= 62;
+}
+
+/**
+ * A bc1 address is bech32 (BIP 173) or bech32m (BIP 350): `bc`, the separator `1`, then data from a 32-letter alphabet
+ * with no `1`, `b`, `i` or `o`, ending in a six-letter checksum. A git sha that starts with `bc1` read as a wallet and
+ * was redacted out of `<sha>..<sha>` (Free Tests 41715139988, test/cso-cli.test.ts); the alphabet in the regex refuses
+ * most such shas, and the checksum, which a random string passes about once in 500 million tries, refuses the rest. Every real
+ * address carries a valid checksum, so none is lost.
+ */
+const BECH32_ALPHABET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+const BECH32_GENERATOR = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
+function bech32ChecksumValid(address: string): boolean {
+  const sep = address.lastIndexOf("1");
+  const hrp = [...address.slice(0, sep)].map((c) => c.charCodeAt(0));
+  const data = [...address.slice(sep + 1)].map((c) => BECH32_ALPHABET.indexOf(c));
+  if (sep < 1 || data.length < 6 || data.some((v) => v < 0)) return false;
+  let chk = 1;
+  for (const v of [...hrp.map((c) => c >> 5), 0, ...hrp.map((c) => c & 31), ...data]) {
+    const top = chk >>> 25;
+    chk = ((chk & 0x1ffffff) << 5) ^ v;
+    BECH32_GENERATOR.forEach((g, i) => {
+      if ((top >>> i) & 1) chk ^= g;
+    });
+  }
+  return chk === 1 || chk === 0x2bc830a3;
 }
 
 // Compact log/backup stamps (`20260727202423` = YYYYMMDDHHMMSS) are bare digit
@@ -356,8 +382,14 @@ export function isNumericMetadataValue(span: string, match: RegExpExecArray): bo
  * (`bun run eval:pass-rates --run 37235771700`), and redacting it breaks that
  * command. Only the position decides: a run/job flag (`--run 37235771700`,
  * `--job=111534615007`), a `gh run view|watch|rerun|download|cancel`
- * argument, an `actions/runs/<id>` or `/job/<id>` URL segment, or a
- * `run_id` / `job_id` key. An 11-digit id (every GitHub Actions run id since
+ * argument, an `actions/runs/<id>` or `/job/<id>` URL segment (with or
+ * without a host: `actions/runs/` at the line start or after whitespace,
+ * `/`, `(`, `[`, `<` or a quote, so `sales-actions/runs/<n>` is not one),
+ * a `run_id` / `job_id` key, or any 11- or 12-digit id of a
+ * `runs=<id>/<attempt>[,<id>/<attempt>…]` list (`run=` too), the receipt a
+ * CI carry or run clear prints (lib/run-evidence.ts runReceiptFields); the
+ * `/<attempt>` of one to three digits after every id is what tells that list
+ * from a number (GST-1227). An 11-digit id (every GitHub Actions run id since
  * 2025) also counts right after a run word on the same line, the way a ship
  * receipt, a READY block or an approval record names one (`screen 40477638211
  * GREEN`, `gate=40323989742`, `rerun passed 40287239206`, `run #19368712345`);
@@ -369,7 +401,8 @@ export function isNumericMetadataValue(span: string, match: RegExpExecArray): bo
  * else still report.
  */
 const CI_ID_POSITION_BEFORE =
-  /(?:--(?:run|job)(?:-id)?(?:[ \t]+|[ \t]*=[ \t]*)|\bgh[ \t]+run[ \t]+(?:view|watch|rerun|download|cancel)[ \t]+|\/actions\/runs\/|\/jobs?\/|(?:run|job)_id["']?[ \t]*[:=][ \t]*["']?)$/i;
+  /(?:--(?:run|job)(?:-id)?(?:[ \t]+|[ \t]*=[ \t]*)|\bgh[ \t]+run[ \t]+(?:view|watch|rerun|download|cancel)[ \t]+|(?:^|[\s\/(\[<"'])actions\/runs\/|\/jobs?\/|(?:run|job)_id["']?[ \t]*[:=][ \t]*["']?)$/i;
+const CI_RUN_LIST = /(?<![\w-])runs?=\d{11,12}\/\d{1,3}(?:,\d{11,12}\/\d{1,3})*(?![\w\/])/gi;
 /** A run word with an optional ':' '#' '=' right before an 11-digit token; shared with gstack-post's chained-id allowlist. */
 export const CI_RUN_WORD_BEFORE = /\b(?:runs?|screens?|gates?|backstop|bisect|rerun|dispatch(?:ed)?|failed|passed)\s*[:#=]?\s*$/i;
 export function isCiRunIdentifier(span: string, match: RegExpExecArray): boolean {
@@ -378,7 +411,27 @@ export function isCiRunIdentifier(span: string, match: RegExpExecArray): boolean
   const { start } = spanBounds(match);
   const lineStart = input.lastIndexOf("\n", start - 1) + 1;
   const before = input.slice(Math.max(lineStart, start - 80), start);
-  return CI_ID_POSITION_BEFORE.test(before) || (span.length === 11 && CI_RUN_WORD_BEFORE.test(before));
+  if (CI_ID_POSITION_BEFORE.test(before) || (span.length === 11 && CI_RUN_WORD_BEFORE.test(before))) return true;
+  const lineEnd = input.indexOf("\n", start);
+  const line = input.slice(lineStart, lineEnd < 0 ? input.length : lineEnd);
+  const at = start - lineStart;
+  return [...line.matchAll(CI_RUN_LIST)].some(m => m.index! < at && at + span.length <= m.index! + m[0].length);
+}
+
+/**
+ * The owner's grant of one scoped fix-check is recorded as `review_loop_grant <stop head sha>`, and an accepted stop as
+ * `review_loop_exception <sha>` (docs/review-policy.md). About one 12-character sha in 300 is all digits
+ * (`367120488513`), and pii.phone.e164 read it as a phone number, so gstack-approvals refused the owner's grant
+ * (APPROVAL_RECORD_SECRET; Free Tests 41667825418, 41766865679). Only the position decides: a digits-only span right
+ * after one of those two tokens and a space, `=` or `:`. The same digits anywhere else, or a number with a `+`,
+ * spaces or dashes after the token, still report.
+ */
+const REVIEW_LOOP_SHA_BEFORE = /\breview_loop_(?:grant|exception)(?:[ \t]+|[ \t]*[:=][ \t]*)$/;
+function isReviewLoopSha(span: string, match: RegExpExecArray): boolean {
+  if (!/^\d+$/.test(span)) return false;
+  const input = match.input ?? "";
+  const { start } = spanBounds(match);
+  return REVIEW_LOOP_SHA_BEFORE.test(input.slice(Math.max(0, start - 40), start));
 }
 
 /**
@@ -395,12 +448,30 @@ export function isCiRunIdentifier(span: string, match: RegExpExecArray): boolean
 const VERSION_DECLARATION_BEFORE =
   /(?:\b[Vv]ersion|\bVERSION|[a-z0-9_]Version|[_-][Vv]ersion|_VERSION)["'\]]?(?:[ \t]*[:=(>][ \t]*|[ \t]+)["']?$/;
 const CHANGELOG_HEADING_BEFORE = /^#{1,6}[ \t]+\[$/;
-export function isDeclaredVersion(match: RegExpExecArray): boolean {
-  const input = match.input ?? "";
-  const { start, end } = spanBounds(match);
+/**
+ * gstack names its own release right before the quad: `gstack 1.94.4.0`, `upgraded gstack from 1.93.14.0`, and the
+ * install check's trailer `gstack: ok 1.94.4.0 for=ship` or `gstack: fail claude,codex (1.93.37.0)`, which every lane
+ * report and PR body quotes (GST-1204). Only a quad shaped like a gstack release (major 0-2) counts, so `gstack 8.8.8.8`,
+ * `my-gstack 1.94.4.0`, `gstack-proxy 1.128.1.0` or `gstack talks to 8.8.8.8` still report.
+ */
+const GSTACK_RELEASE = /^[0-2]\./;
+const GSTACK_NAMED_BEFORE = /(?<![\w./-])gstack(?:[ \t]*:[ \t]*(?:ok|fail)(?:[ \t]+[a-z0-9_,-]+)?[ \t]+\(?|[ \t]+(?:from[ \t]+)?)$/;
+/** The second end of a range (`X to Y`, `X-Y`) whose first end is a declared version with the same major. */
+const RANGE_END_BEFORE = /(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})[ \t]*(?:to|through|-|\u2013)[ \t]*$/;
+function declaredAt(input: string, start: number, end: number, range: boolean): boolean {
   const lineStart = input.lastIndexOf("\n", start - 1) + 1;
-  if (VERSION_DECLARATION_BEFORE.test(input.slice(Math.max(lineStart, start - 48), start))) return true;
-  return CHANGELOG_HEADING_BEFORE.test(input.slice(lineStart, start)) && input[end] === "]";
+  const before = input.slice(Math.max(lineStart, start - 48), start);
+  const span = input.slice(start, end);
+  if (VERSION_DECLARATION_BEFORE.test(before) || (GSTACK_NAMED_BEFORE.test(before) && GSTACK_RELEASE.test(span))) return true;
+  if (CHANGELOG_HEADING_BEFORE.test(input.slice(lineStart, start)) && input[end] === "]") return true;
+  const first = range ? RANGE_END_BEFORE.exec(before) : null;
+  if (!first || first[1]!.split(".")[0] !== span.split(".")[0]) return false;
+  const firstStart = start - before.length + first.index;
+  return declaredAt(input, firstStart, firstStart + first[1]!.length, false);
+}
+export function isDeclaredVersion(match: RegExpExecArray): boolean {
+  const { start, end } = spanBounds(match);
+  return declaredAt(match.input ?? "", start, end, true);
 }
 
 // ── Placeholder suppression (per-matched-span, NOT per-line) ─────────────────
@@ -1247,8 +1318,9 @@ export const PATTERNS: RedactPattern[] = [
     // so do a county tax-map parcel ID (see looksLikeParcelId), vector
     // coordinates (looksLikeDecimalCoordinates) and seed/nonce/timestamp JSON
     // values (isNumericMetadataValue), GitHub Actions run and job ids in
-    // their id positions (isCiRunIdentifier), and bare powers of two and
-    // hash/PRNG constants (isNumericConstant).
+    // their id positions (isCiRunIdentifier), a short sha after
+    // review_loop_grant or review_loop_exception (isReviewLoopSha), and bare
+    // powers of two and hash/PRNG constants (isNumericConstant).
     validate: (span, match) =>
       !insideUuid(match) &&
       span.replace(/\D/g, "").length >= 10 &&
@@ -1257,7 +1329,8 @@ export const PATTERNS: RedactPattern[] = [
       !looksLikeParcelId(span, match) &&
       !looksLikeDecimalCoordinates(span) &&
       !isNumericMetadataValue(span, match) &&
-      !isCiRunIdentifier(span, match),
+      !isCiRunIdentifier(span, match) &&
+      !isReviewLoopSha(span, match),
   },
   {
     id: "pii.ssn",
@@ -1301,7 +1374,7 @@ export const PATTERNS: RedactPattern[] = [
     tier: "MEDIUM",
     category: "pii",
     description: "Crypto wallet address (ETH/BTC)",
-    regex: /\b(0x[a-fA-F0-9]{40}|bc1[a-z0-9]{25,39}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})\b/,
+    regex: /\b(0x[a-fA-F0-9]{40}|bc1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{25,39}|[13][a-km-zA-HJ-NP-Z1-9]{25,34})\b/,
     validate: (span) => looksLikeWallet(span),
   },
 

@@ -359,6 +359,34 @@ describe('Capy pass program (fake host, real bins)', () => {
     expect(Object.keys(m.log_starts ?? {}).sort()).toEqual(['pass:review', 'voices:adversarial-review']);
   }, 240_000);
 
+  // Value: protects=Step 11 on its own --out (the head moved after a fix round) renders and sends only the voices, so its ledger verifies clean; fails_when=pass renders the plan's first and specialists stages for a voices-only program, leaving BRIEF specialist-batched NOT_SENT in the ledger;
+  //   why_new=GST-1368 (gstack-evals#208 at fb407fb: VERIFY: dirty briefs=4 outputs=3); seam=none; no_claim=which plan flags Step 11 takes
+  test('Step 11 on a fresh --out renders only the voices, and its ledger verifies clean', async () => {
+    const { dir, env } = repo();
+    const out = path.join(dir, '.state/run/s11');
+    const h = host(dir, env);
+    const models = { 'outside-voice': { model_id: 'openai/gpt-6.1-sol' } };
+    const res = await runPass(h, { base: 'main', out, pass: 'x7s11', planFlags: ['--depth-floor', 'full'], stage: 'voices', models });
+    expect(res).toContain('NEXT: judge the voices');
+    const m = JSON.parse(fs.readFileSync(path.join(out, 'pass-manifest.json'), 'utf8')) as Manifest;
+    fs.writeFileSync(path.join(out, 'judged.jsonl'), '');
+    expect(bin(dir, env, ['judge', '--ledger', m.ledger, '--merged', m.merged, '--judged', path.join(out, 'judged.jsonl')]).status).toBe(0);
+    const v = bin(dir, env, ['verify', '--ledger', m.ledger]);
+    expect(v.stdout).not.toContain('NOT_SENT');
+    expect(v.stdout).toContain('VERIFY: clean briefs=' + m.readers.length);
+    expect(m.readers.length).toBeGreaterThan(0);
+    expect(m.readers.every(r => r.stage === 'voices' && r.state === 'collected')).toBe(true);
+    expect(h.creates.map(c => c.title).sort()).toEqual(m.readers.map(r => r.title).sort());
+    const rendered = fs.readFileSync(m.ledger, 'utf8').trim().split('\n').map(l => JSON.parse(l)).filter(e => e.event === 'rendered').map(e => e.reader);
+    expect(rendered.sort()).toEqual(m.readers.map(r => r.reader).sort());
+    const reviewer = bin(dir, env, ['pass', '--base', 'main', '--out', out, '--pass', 'x7s11', '--', '--depth-floor', 'full']);
+    expect([reviewer.status === 0, reviewer.stderr]).toEqual([false, expect.stringContaining("holds only Step 11's voices")]);
+    const extras = path.join(dir, '.state/extras.json');
+    fs.writeFileSync(extras, JSON.stringify([{ name: 'plan', prompt_file: path.join(dir, 'package.json') }]));
+    const audit = bin(dir, env, ['pass', '--base', 'main', '--out', path.join(dir, '.state/run/s11x'), '--pass', 'x7s11x', '--voices', '--extras', extras, '--', '--depth-floor', 'full']);
+    expect([audit.status === 0, audit.stderr]).toEqual([false, expect.stringContaining("Step 11's voices pass sends no audit reader")]);
+  }, 240_000);
+
   test('Step 11 voices run from the same manifest; the outside voice needs a model of another family', async () => {
     const { dir, env } = repo();
     const out = path.join(dir, '.state/run/p1');
@@ -677,6 +705,29 @@ describe('Capy pass program (fake host, real bins)', () => {
     expect(res).toContain('NEXT: apply the docs audit (Step 14.5)');
     expect(bin(dir, env, ['pass', '--base', 'main', '--out', path.join(dir, '.state/run/d2'), '--pass', 'x16b', '--audit-only']).status).not.toBe(0);
   }, 240_000);
+
+  // Value: protects=a pass id typed in capitals is read as its lowercase id, so the manifest, its titles and a resume agree, and an id with other characters is still refused naming the rule; fails_when=--pass P1 is refused as a missing flag (gstack-evals#191 /ship), a capitalized resume of p1 reads as another pass, or p_1 is accepted;
+  //   why_new=the id was matched case-sensitively and its refusal read as a missing flag; seam=gstack-review-dispatch pass; no_claim=the reviewer plan, which --audit-only skips
+  test('pass reads its id as lowercase; an id with other characters is still refused with the rule', () => {
+    const { dir, env } = repo();
+    const out = path.join(dir, '.state/run/docs');
+    fs.mkdirSync(out, { recursive: true });
+    fs.writeFileSync(path.join(out, 'docs.prompt.md'), 'Run Step 14.5 as written.\n');
+    const extras = path.join(dir, '.state/extras.json');
+    fs.writeFileSync(extras, JSON.stringify([{ name: 'docs', prompt_file: path.join(out, 'docs.prompt.md'), first: true }]));
+    const args = (id: string) => ['pass', '--base', 'main', '--out', out, '--pass', id, '--audit-only', '--extras', extras];
+    const upper = bin(dir, env, args('Docs-P1'));
+    expect(upper.status, upper.stderr).toBe(0);
+    expect(upper.stdout).toContain(`MANIFEST: file=${path.join(out, 'pass-manifest.json')} pass=docs-p1 readers=1 audit-only`);
+    const m = JSON.parse(fs.readFileSync(path.join(out, 'pass-manifest.json'), 'utf8'));
+    expect([m.pass, m.readers[0].title]).toEqual(['docs-p1', 'ship docs-p1 audit/docs']);
+    const resumed = bin(dir, env, args('docs-p1'));
+    expect([resumed.status, resumed.stdout.includes('pass=docs-p1 readers=1 resumed')]).toEqual([0, true]);
+    for (const bad of ['p_1', 'p 1', 'p1/']) {
+      const r = bin(dir, env, args(bad));
+      expect([r.status, r.stderr.trim()]).toEqual([2, `gstack-review-dispatch pass: --pass ${JSON.stringify(bad)} is not a pass id: use letters, digits and dashes (read as lowercase, so P1 is p1)`]);
+    }
+  }, 120_000);
 
   test('Step 11 notes its own growth from its first dispatch, not from the pass\'s starting reading', async () => {
     const { dir, env } = repo();

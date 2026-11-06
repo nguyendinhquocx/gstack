@@ -19,7 +19,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { checkReviewedTree, isReviewedTreeLine, promptHash, type TreeCheck } from './review-brief';
 
-export interface LedgerEvent { event: 'rendered' | 'sent' | 'output' | 'judgment' | 'judge' | 'program'; [k: string]: unknown }
+export interface LedgerEvent { event: 'rendered' | 'sent' | 'output' | 'judgment' | 'judge' | 'program' | 'quarantined' | 'fetch-sweep'; [k: string]: unknown }
 export const readerKey = (role: string, name?: string) => (name ? `${role}/${name}` : role);
 
 export function appendEvent(ledger: string, e: LedgerEvent): void {
@@ -86,6 +86,11 @@ const LEAD_LABEL = new RegExp(`^(?:[^\\p{L}\\p{N}\\s]\\s*|\\d+[.)]\\s*)*(?:\\w[\
 const STATED_BLOCKS = /(?<![A-Za-z0-9])Blocks\**\s*:?\s*\**\s*(yes|no)(?![A-Za-z0-9])/gi;
 /** A prose reader's `Blocks` field as it can lower a count (GST-1031): its colon required, so prose ("blocks no other writer") never does, and a JSON finding (no Blocks field in its schema) never has one. */
 const BLOCKS_FIELD = /(?<![A-Za-z0-9])Blocks\**\s*:\s*\**\s*(yes|no)(?![A-Za-z0-9-])/gi;
+/** A native voice's finding whose reader stated `Blocks: no` and one Severity (GST-1031 ruling A): lead judgment may lower it to that Severity, never below, on record with a reason (GST-1406). */
+const statedLowering = (reader: string, raw: string, to: number) => {
+  const ls = [...raw.matchAll(SEVERITY_FIELD)].flatMap(m => (m[1] ?? m[2]!).match(FIELD_LABELS)!);
+  return reader.split('/')[0] === 'adversarial-native' && statesNoBlocks(raw) && ls.length === 1 && to >= (rank(ls[0]!) || Infinity);
+};
 export const statesNoBlocks = (raw: string) => { if (raw.startsWith('{') || BLOCKS_YES.test(raw)) return false; const said = [...raw.matchAll(BLOCKS_FIELD)].map(m => m[1]!.toLowerCase()); return said.length > 0 && !said.includes('yes'); };
 /**
  * A summary candidate (GST-1031): a prose finding whose every severity word is denied ("so nothing is CRITICAL", "No CRITICAL issues")
@@ -339,7 +344,7 @@ export function judge(merged: MergedLine[], judged: JudgedLine[]): Judgment {
     const from = rank(m.label) ?? 0;
     const to = rank(target.severity);
     if (to === null) continue;
-    if (to < from) (!j.duplicate_of && j.reason?.trim() && summaryCandidate(m.raw) ? res.dismissed : res.downgraded).push(m.id);
+    if (to < from) (!j.duplicate_of && j.reason?.trim() && (summaryCandidate(m.raw) || statedLowering(m.reader, m.raw, to)) ? res.dismissed : res.downgraded).push(m.id);
     else if (j.duplicate_of) res.folded.push(m.id);
     else if (to > from) { res.promoted.push(m.id); if (!j.reason?.trim()) res.unexplained.push(m.id); }
   }
@@ -408,14 +413,17 @@ export function ledgerBlockers(ledger: string): LedgerBlocker[] {
   const ranks = new Map<string, number>();
   const unblocking = new Map<string, number>();
   const raws = new Map<string, string>();
+  const readers = new Map<string, string>();
   const loci = new Map<string, string | null>();
-  for (const o of events.filter(e => e.event === 'output' && Array.isArray(e.ids) && e.ids.length)) {
+  const gone = quarantinedIds(events);
+  for (const o of events.filter(e => e.event === 'output' && idsOf(e).some(id => !gone.has(id)))) {
     const lines = jsonLines(read(o.merged, `merged file of ${String(o.reader)}`), String(o.merged)) as MergedLine[];
-    for (const id of o.ids as string[]) {
+    for (const id of idsOf(o).filter(id => !gone.has(id))) {
       const line = lines.find(l => l.id === id) ?? fail(`collected id ${id} is missing from ${String(o.merged)}`);
       ranks.set(id, rank(line.label) ?? 0);
       if (statesNoBlocks(line.raw)) unblocking.set(id, rank(line.label) ?? 0);
       raws.set(id, line.raw);
+      readers.set(id, String(o.reader));
       loci.set(id, lineLocus(line.raw));
     }
   }
@@ -425,7 +433,7 @@ export function ledgerBlockers(ledger: string): LedgerBlocker[] {
     if (promptHash(text) !== verdict.judged_sha256) fail(`judged set ${String(verdict.judged)} changed since judge`);
     for (const j of jsonLines(text, String(verdict.judged)) as JudgedLine[]) {
       if (j.duplicate_of) { ranks.delete(j.id); continue; }
-      const dismissed = !!j.reason?.trim() && summaryCandidate(raws.get(j.id) ?? '');
+      const dismissed = !!j.reason?.trim() && (summaryCandidate(raws.get(j.id) ?? '') || statedLowering(readers.get(j.id) ?? '', raws.get(j.id) ?? '', rank(j.severity) ?? 0));
       ranks.set(j.id, dismissed ? rank(j.severity) ?? 0 : Math.max(ranks.get(j.id) ?? 0, rank(j.severity) ?? 0));
       if (!loci.has(j.id)) loci.set(j.id, lineLocus(j.reason ?? ''));
     }
@@ -447,9 +455,16 @@ function reviewed(o: LedgerEvent, render?: LedgerEvent): boolean {
 }
 
 /** Every id collect recorded, in order. */
-const collectedIds = (events: LedgerEvent[]) => events.filter(e => e.event === 'output').flatMap(e => (Array.isArray(e.ids) ? (e.ids as string[]) : []));
+const idsOf = (e: LedgerEvent) => (Array.isArray(e.ids) ? (e.ids as string[]) : []);
+/** Ids a fetch violation quarantined (lib/review-sweep.ts): they left merged.jsonl and no consumer of the ledger counts them. */
+export const quarantinedIds = (events: LedgerEvent[]) => new Set(events.filter(e => e.event === 'quarantined').flatMap(idsOf));
+/** Ids collect recorded, less the quarantined ones. */
+const collectedIds = (events: LedgerEvent[]) => {
+  const gone = quarantinedIds(events);
+  return events.filter(e => e.event === 'output').flatMap(idsOf).filter(id => !gone.has(id));
+};
 
-export interface VerifyRow { kind: 'BRIEF' | 'OUTPUT' | 'JUDGE'; reader: string; status: string; detail: string }
+export interface VerifyRow { kind: 'BRIEF' | 'OUTPUT' | 'JUDGE' | 'FETCH'; reader: string; status: string; detail: string }
 
 /** Replay every check from a finished run's ledger: briefs dispatched as rendered, outputs merged as returned, judgment without loss. */
 export function verify(ledger: string): { rows: VerifyRow[]; clean: boolean; briefs: number; voided: number; unavailable: number } {
@@ -490,12 +505,18 @@ export function verify(ledger: string): { rows: VerifyRow[]; clean: boolean; bri
     let payloadNow: string | null = null;
     if (!overwritten && payload && typeof payload.file === 'string') { try { payloadNow = createHash('sha256').update(fs.readFileSync(payload.file)).digest('hex'); } catch { payloadNow = ''; } }
     const tampered = (fileNow && fileNow !== r.sha256 ? ' file_changed_since_render' : '') + (payloadNow !== null && payloadNow !== payload!.sha256 ? ' payload_changed_since_render' : '');
-    rows.push({ kind: 'BRIEF', reader: p.label, status: tampered ? 'MISMATCH' : status, detail: `rendered=${short(r.sha256)} sent=${sent.map(({ e }) => short(e.sha256)).join(',') || '-'}${epVoided ? ` voided=${epVoided}` : ''}${outputs.length && !collected && !unavailable ? ' not_reviewed' : ''}${tampered}` });
+    // A fetch violation quarantined this dispatch; it counts only once a later render of the same reader replaced it.
+    const quarantine = inside.some(({ e }) => e.event === 'quarantined') ? (p.next < events.length ? 'SUPERSEDED' : 'QUARANTINED') : null;
+    rows.push({ kind: 'BRIEF', reader: p.label, status: quarantine ?? (tampered ? 'MISMATCH' : status), detail: `rendered=${short(r.sha256)} sent=${sent.map(({ e }) => short(e.sha256)).join(',') || '-'}${epVoided ? ` voided=${epVoided}` : ''}${outputs.length && !collected && !unavailable ? ' not_reviewed' : ''}${tampered}${quarantine ? ' quarantined' : ''}` });
   }
   for (const [i, o] of events.entries()) {
     if (o.event !== 'output') continue;
     const reader = String(o.reader);
     const p = episodes.find(q => q.reader === reader && q.at < i && i < q.next);
+    if (p && events.slice(i + 1, p.next).some(e => e.event === 'quarantined' && e.reader === reader)) {
+      rows.push({ kind: 'OUTPUT', reader: p.label, status: p.next < events.length ? 'SUPERSEDED' : 'QUARANTINED', detail: `sha=${short(o.sha256)} findings=${idsOf(o).length} quarantined` });
+      continue;
+    }
     let status = 'MATCH';
     const notes: string[] = [];
     const lastSent = p ? events.slice(p.at + 1, i).filter(e => e.event === 'sent' && e.reader === reader).at(-1) : undefined;
@@ -510,14 +531,14 @@ export function verify(ledger: string): { rows: VerifyRow[]; clean: boolean; bri
     try { lines = typeof o.merged === 'string' ? readJsonl<MergedLine>(o.merged).filter(l => ids.includes(l.id)) : []; } catch { notes.push('merged_unreadable'); status = 'MISMATCH'; }
     if (lines.length !== ids.length) { status = 'MISMATCH'; notes.push(`merged_lines=${lines.length}/${ids.length}`); }
     if (lines.some(l => l.output_sha256 !== o.sha256)) { status = 'MISMATCH'; notes.push('merged_line_from_other_output'); }
-    // Each merged row must be the finding collect parses at that id's index from the unchanged output, label and raw text byte for byte.
+    // Each merged row must be the finding collect parses at that id's index from the unchanged output, its reader, label and raw text byte for byte.
     if (text === undefined) {
       status = 'MISMATCH';
       notes.push(typeof o.file === 'string' ? 'output_file_missing' : 'output_file_unrecorded');
       differs.push(...ids);
     } else if (promptHash(text) === o.sha256) {
       const parsed = parseFindings(reader, text, o.fixable_raises !== false);
-      const off = ids.filter((id, k) => { const m = lines.find(l => l.id === id); return !m || parsed[k]?.label !== m.label || parsed[k]?.raw !== m.raw; });
+      const off = ids.filter((id, k) => { const m = lines.find(l => l.id === id); return !m || m.reader !== reader || parsed[k]?.label !== m.label || parsed[k]?.raw !== m.raw; });
       if (unavailableOutput(o) && parsed.length) { status = 'MISMATCH'; notes.push('unavailable_output_has_findings'); }
       else if (!unavailableOutput(o)) {
         if (off.length) { status = 'MISMATCH'; notes.push(`merged_line_differs=${JSON.stringify(off)}`); differs.push(...off); }
@@ -565,6 +586,13 @@ export function verify(ledger: string): { rows: VerifyRow[]; clean: boolean; bri
     const status = !v.ok ? 'REJECTED' : notes.length ? 'MISMATCH' : 'OK';
     rows.push({ kind: 'JUDGE', reader: '-', status, detail: `dropped=${JSON.stringify(v.dropped)} downgraded=${JSON.stringify(v.downgraded)} added=${v.added} promoted=${v.promoted} folded=${v.folded}${v.dismissed ? ` dismissed=${v.dismissed}` : ''}${notes.length ? ' ' + notes.join(' ') : ''}` });
   } else if (events.some(e => e.event === 'output')) rows.push({ kind: 'JUDGE', reader: '-', status: 'MISSING', detail: 'outputs were collected but no judged set was checked' });
-  const clean = episodes.length > 0 && rows.every(r => ['MATCH', 'OK', 'VOIDED', 'UNAVAILABLE'].includes(r.status));
+  // Each stage sweep's verdict; a violation stays open until a later attempt of the same stage swept clean or partial.
+  const sweeps = events.filter(e => e.event === 'fetch-sweep');
+  for (const s of sweeps) {
+    const resolved = s.verdict === 'violation' && sweeps.some(t => t.pass === s.pass && t.stage === s.stage && Number(t.attempt) > Number(s.attempt) && t.verdict !== 'violation');
+    const found = Array.isArray(s.found) ? (s.found as Array<{ path: string }>) : [];
+    rows.push({ kind: 'FETCH', reader: `${String(s.pass)}/${String(s.stage)}#${String(s.attempt)}`, status: s.verdict === 'violation' ? (resolved ? 'RESOLVED' : 'VIOLATION') : String(s.verdict).toUpperCase(), detail: `found=${found.length}${found.length ? ` paths=${JSON.stringify(found.map(x => x.path))}` : ''}${s.partial ? ` partial=${JSON.stringify(s.partial)}` : ''}` });
+  }
+  const clean = episodes.length > 0 && rows.every(r => ['MATCH', 'OK', 'VOIDED', 'UNAVAILABLE', 'SUPERSEDED', 'CLEAN', 'PARTIAL', 'RESOLVED'].includes(r.status));
   return { rows, clean, briefs: episodes.length, voided, unavailable: rows.filter(r => r.kind === 'BRIEF' && r.status === 'UNAVAILABLE').length };
 }

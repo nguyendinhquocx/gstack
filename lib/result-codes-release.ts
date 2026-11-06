@@ -541,9 +541,30 @@ export const RELEASE_RESULT_CODES = {
     summary: 'git could not read a reviewer\'s diff (reason=timeout after timeout_ms, or reason=git-exit with git\'s exit code), so /ship stopped; the full stderr, with remote URLs redacted, is in the log= file',
     fix: 'timeout: rerun once unchanged, then split the PR or exclude its largest data folders on the base; git exit 128: git fetch origin <base>, then rerun once; anything else: stop and ask a person',
   },
+  REVIEW_PLAN_STOPPED: {
+    anchor: 'review-plan-stopped',
+    summary: 'gstack-review-plan did not finish inside the pass (reason=timeout after timeout_ms, reason=signal when something killed it, reason=spawn when it could not start), so gstack-review-dispatch pass stopped before writing a manifest or dispatching a reader',
+    fix: 'rerun the pass once unchanged; if it stops again, report this line and the repository\'s file count (git ls-files | wc -l) to your Captain; reason=signal: check the machine\'s free memory first',
+  },
   REVIEW_EXCLUDE_REFERENCE: {
     anchor: 'review-exclude-reference',
     summary: 'informational: a kept code file names an excluded folder (a directory reference, not a full file path), so its files stay excluded and readers see that code without the files it reads',
     fix: 'nothing to do for the review; if that code\'s correctness depends on the excluded files, narrow review_exclude_paths on the base so they stay in the diff',
+  },
+  // The fetch rule's per-stage sweep (lib/review-sweep.ts, GST-1322).
+  FETCH_VIOLATION: {
+    anchor: 'fetch-violation',
+    summary: 'a git repository with a network remote or a file of 100 MB or more appeared during one review stage, so every reader of that stage was quarantined and verify refuses until the stage reruns clean',
+    fix: 'the pass reruns each slot once as <reader>#2 by itself; inspect each printed KEEP: path and leave it alone (nothing attributes it to a reader, so never delete it), then write a decision-trail row and tell your Captain',
+  },
+  FETCH_RERUN_BLOCKED: {
+    anchor: 'fetch-rerun-blocked',
+    summary: 'a path a stage\'s first attempt found still exists, so no stage of the pass, Step 11\'s voices included, dispatched a reader (one could read that path and sweep clean) and verify keeps refusing',
+    fix: 'stop and report the printed path to your Captain; leave it alone (nothing attributes it to a reader, so never move or delete it yourself)',
+  },
+  FETCH_RERUN_SPENT: {
+    anchor: 'fetch-rerun-spent',
+    summary: 'the stage\'s one rerun fetched too, so the pass stopped with its readers quarantined, resuming it starts no later stage and returns no reader output, and verify refuses',
+    fix: 'deal with the printed paths, find out why readers keep fetching, then start a fresh pass under a new --pass and --out; a third attempt is never automatic',
   },
 } as const satisfies Record<string, ResultCode>;

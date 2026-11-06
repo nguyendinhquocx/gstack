@@ -360,7 +360,11 @@ gstack_result_anchor() {
     PREGATE_HEAD_POLICY_LOOSENS) printf '%s' 'pregate-head-policy-loosens' ;;
     REVIEW_DIFF_TOO_LARGE) printf '%s' 'review-diff-too-large' ;;
     REVIEW_DIFF_UNREADABLE) printf '%s' 'review-diff-unreadable' ;;
+    REVIEW_PLAN_STOPPED) printf '%s' 'review-plan-stopped' ;;
     REVIEW_EXCLUDE_REFERENCE) printf '%s' 'review-exclude-reference' ;;
+    FETCH_VIOLATION) printf '%s' 'fetch-violation' ;;
+    FETCH_RERUN_BLOCKED) printf '%s' 'fetch-rerun-blocked' ;;
+    FETCH_RERUN_SPENT) printf '%s' 'fetch-rerun-spent' ;;
     APPROVAL_RECORD_INVALID) printf '%s' 'approval-record-invalid' ;;
     APPROVAL_RECORD_SECRET) printf '%s' 'approval-record-secret' ;;
     APPROVAL_RECORD_NO_BRANCH) printf '%s' 'approval-record-no-branch' ;;

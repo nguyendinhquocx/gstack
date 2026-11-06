@@ -3143,6 +3143,29 @@ table above and end each error line with a code in parentheses. The policy
 file is described in [docs/ship-policy.md](ship-policy.md); the queue flow in
 [docs/ship-policy.md#stamp-at-merge](ship-policy.md#stamp-at-merge).
 
+<a id="route-bounded-refused"></a>
+### `ROUTE_BOUNDED_REFUSED: <path> <reason> (fix: …)`
+
+**Meaning.** `gstack-ship-release finish` found a post-review edit of a
+bounded kind (audit prose, a `.gstack/pregate.json` lane change, or a
+declared bookkeeping file) that failed one of its proofs, so the path stays
+behavior and finish stops for Steps 5–11.5
+([review-policy.md#bounded-post-review-edits](review-policy.md#bounded-post-review-edits)).
+The reason names the failed proof: `needs --reviewed-base`, `changed <n>
+lines since review (at most 20)`, `is binary or unreadable`, `carries a
+hunk the gate scan tagged`, `could not be gate-scanned`, `is not a doc the Step 14.5 audit snapshot
+recorded`, `is not the bytes the post-audit snapshot recorded (edited after
+the audit)`, `does not parse at both the reviewed and the current tree`,
+`loosens the reviewed policy: <what>`, `changes <key>; a lanes edit changes
+only dependencies`, `adds no lane`, or `is a gate path or under .gstack/ or
+.github/, never bookkeeping`.
+
+**Fix.** Do what the line's `fix:` says. Rerun finish with the merge base
+saved with the reviewed tree. Restore the audited bytes, or the mapping a
+lane change removed (a `[]` declaration lands on the base first). Or take
+Steps 5–11.5 for the edit. Never shrink an edit to get under the cap by
+moving its lines into another file.
+
 <a id="policy-source-unavailable"></a>
 ### `policy source unavailable — fix: git fetch origin <base> --depth=1 (POLICY_SOURCE_UNAVAILABLE)`
 
@@ -3473,6 +3496,19 @@ the field without a review. Do not do that. Rerun
 run `gstack-review-dispatch verify --ledger <ledger>`, which prints
 `REVIEW_EXCLUDE_RECORD: digest=<d>` from the briefs the readers got, then
 `gstack-ship-receipt write --pr <n> --review-exclude <d> --body <body>`.
+`recorded=none` with a `no --review-exclude was given` note means the write left the flag out: pass the digest
+`verify` printed. When the only change since the review is Step 14.5's docs audit editing, adding or
+removing files under a pattern, pass that run's `--docs-post <audit-id>-post.json` and its Prepare snapshot as
+`--docs-pre` as well instead of rerunning the review; the refusal's `the docs-audit exception does not apply:` clause says why when it cannot
+([ship-policy.md](ship-policy.md#review-exclude-paths), GST-1429).
+
+Write, carry and the queue bind a digest that differs (`recorded=none`, written before the base
+gained `review_exclude_paths`, or a digest from an older policy) when the recorded selection and
+HEAD's give the PR's files the same applied patterns, excluded files and kept files (GST-1434,
+GST-1446). Write rebuilds the recorded selection from the policies the base held and prints
+`REVIEW_EXCLUDE_POLICY_MOVED:` when it binds. So this line means the two selections differ over the
+PR's files, or write could not rebuild the digest from any policy the base held (a shallow clone
+of the base can cause that: fetch its history and rerun write).
 
 <a id="review-diff-too-large"></a>
 ### `REVIEW_DIFF_TOO_LARGE`
@@ -3496,7 +3532,10 @@ the base policy commit.
   files need more than 24,000 argument bytes. Narrow the pattern, move the kept
   files out of it, or split the PR.
 - **Still over after exclusion:** add the printed folders to the base policy, or
-  split the PR.
+  split the PR. Files kept only for a secret line already count as their
+  excerpts ([secret-line excerpts](ship-policy.md#secret-line-excerpts)); one in
+  `DIFF_KEEP:` that still counts whole is kept for another reason or could not
+  be excerpted.
 
 There is no override flag. See [the review ceiling](ship-policy.md#review-diff-ceiling).
 
@@ -3516,6 +3555,21 @@ exclude its largest data folders on the base; git exit 128 (a missing object or
 an unfetched base), `git fetch origin <base>` and rerun once; anything else, stop
 and ask a person with the log file.
 
+<a id="review-plan-stopped"></a>
+### `REVIEW_PLAN_STOPPED`
+
+**Meaning.** `gstack-review-dispatch pass` runs `gstack-review-plan` before it
+writes a manifest, and that run did not finish, so the pass stopped (exit 1)
+without dispatching a reader. The line names the step (the plan command),
+`reason=timeout` with `timeout_ms` (180,000 ms; `GSTACK_REVIEW_PLAN_TIMEOUT_MS`
+sets it in milliseconds), `reason=signal` with the signal when something else
+killed it, or `reason=spawn` when it could not start. Before this line existed, a
+plan that ran past the limit was killed with no output (GST-1442).
+
+**Fix.** Rerun the pass once unchanged. If it stops again, report the line and the
+repository's file count (`git ls-files | wc -l`) to your Captain. For
+`reason=signal`, check the machine's free memory first.
+
 <a id="review-exclude-reference"></a>
 ### `REVIEW_EXCLUDE_REFERENCE`
 
@@ -3526,6 +3580,58 @@ does, so readers see that code without the files it reads.
 
 **Fix.** Nothing for the review itself. If the code's correctness depends on the
 excluded files, narrow the pattern on the base so they stay in the diff.
+
+<a id="fetch-violation"></a>
+### `FETCH_VIOLATION`
+
+**Meaning.** A reader broke [the fetch rule](review-policy.md#what-readers-may-fetch):
+between the start and the end of one review stage, a git repository with a
+network remote, or a file of 100 MB or more, appeared under the workspace, home
+or the temp dir. `gstack-review-dispatch sweep --phase end` prints one line per
+path (`kind=repo|download`, the remote, the size and the stage's readers). Capy
+exposes no reader id, so the stage is the unit: every reader of that stage is
+quarantined. Its reply moves to `<out>/quarantine/` (mode 0600), its findings
+leave `merged.jsonl`, and it never reaches the Red Team, the judge, the
+returned output or PR text. `verify` prints `FETCH_VIOLATION:` and refuses
+until the stage has rerun and swept clean.
+
+**Fix.** Nothing to rerun by hand: the pass plans one fresh attempt per slot
+(`RERUN:`, readers named `<reader>#2`; not a review round) and the pass program
+dispatches them next. Each path gets a `KEEP:` line and never a delete command:
+the sweep goes by time alone, and no transcript can tie a path to a reader, so a
+clone another process on the machine made in the same window looks the same.
+Inspect each path and leave it alone, then write a decision-trail row and tell
+your Captain. A sweep that hit its bounds (depth 6, 200,000 entries or 20 seconds)
+prints `FETCH_SWEEP: partial`, a note that is never a refusal.
+
+<a id="fetch-rerun-blocked"></a>
+### `FETCH_RERUN_BLOCKED`
+
+**Meaning.** A path a stage's first attempt found (a `FETCH_VIOLATION:` line)
+still exists when that stage's rerun, or any other stage of the same pass
+(Step 11's voices included), starts. A reader could open that clone or
+download and still sweep clean, so no reader is dispatched, the pass stops
+(exit 3) and `verify` keeps refusing with the first attempt's
+`FETCH_VIOLATION`.
+
+**Fix.** Stop and report the printed path to your Captain. Leave it alone: no
+transcript ties it to a reader, so never move or delete it yourself. Once the
+path is gone, rerunning the same pass program resumes the rerun from its
+manifest.
+
+<a id="fetch-rerun-spent"></a>
+### `FETCH_RERUN_SPENT`
+
+**Meaning.** The stage's one rerun fetched too, so the pass stopped (exit 3).
+Its readers are quarantined like the first attempt's, nothing they wrote is
+merged, and `verify` refuses. Running the same pass program again stops at
+once: it starts no later stage (no Red Team beside the kept paths) and returns
+no reader output.
+
+**Fix.** Deal with the paths the `FETCH_VIOLATION:` lines name as above. Then
+find out why readers keep fetching (a brief or a checklist that sends them to
+another repository, or a sealed path the policy does not list yet) and start a
+fresh pass under a new `--pass` and `--out`. A third attempt is never automatic.
 
 <a id="execution-unknown"></a>
 ### `EXECUTION_UNKNOWN`
@@ -5659,6 +5765,7 @@ normal pin check, then records the repair on the freeze under the land lock
 (`REPAIR: #<n>@<sha> admitted under the land lock`) and lands it; the freeze
 stays active. The next main backstop clears it when its gate is green on that
 main (`BACKSTOP: freeze cleared (repair #<n>; backstop <run> green on <sha>)`).
+Once main's policy declares `release_gate`, the backstop stands down: `land --pin` only warns (`FREEZE: warn only:`) about a backstop freeze left from before and lands, and `release-cut` lets that freeze go once a green release gate sits on a commit that contains the freeze's main ([release_gate](ship-policy.md#direct-freeze)).
 A second `--repair` is refused while the admitted one has merged at its
 recorded pin and no backstop has judged it; one that never merged there gives
 way. See
@@ -6356,7 +6463,10 @@ on the new head. `gstack-ship-release finish` stops the same way with
 write that record beside the packet, outside the worktree, so it does not change
 the tree it is bound to. Finish also stops this way for test code changed since
 review with no gate edit (`tests=N`): the packet holds those test hunks, and the
-reviewer checks that each test still tests what it did. A packet that cannot be
+reviewer checks that each test still tests what it did. It stops this way for
+[bounded post-review edits](review-policy.md#bounded-post-review-edits) too
+(`bounded=N`): one scoped reader, not a review round, reads the packet, and
+its clean record must also carry the `packet_sha256` the STOP line prints. A packet that cannot be
 written (an unwritable `.git`) is a STOP or `RECEIPT_CARRY_REFUSED` naming the path.
 `carry --dry-run` reports this code without writing the packet, and only when
 none of carry's other checks would refuse; carry without `--dry-run` writes it.
@@ -6944,6 +7054,16 @@ These codes come from `scripts/ubicloud/ubi-runner.sh` (GST-1220). `RECOVERED`, 
 ### `SINK_FLUSH_FAILED: vm=<name> seq=<n> last_push=<epoch|never> [sink_skipped=size|tar_failed]`
 
 **Meaning.** `down` stopped the VM's pusher and ran one last push, and that push failed, took longer than 150 seconds, or was skipped because the results were over `UBI_SINK_MAX_MB` (`size`) or couldn't be read (`tar_failed`). A skipped snapshot is never uploaded, so the sink keeps the last good one. The VM was destroyed anyway, so the sink holds results only up to the push made at `last_push`. A `run` or `verify` of that VM exits 1 instead of 0. **Fix.** Treat the run's results as incomplete. Check that the presigned URL hasn't expired and still allows a PUT, then rerun. For a tiered `verify`, rerun with `--no-resume`: a plain rerun reuses the tiers that already passed under the same key, creates no VM and pushes nothing, so the sink would still hold the incomplete snapshot.
+
+<a id="ubi-create-unknown"></a>
+### `UBI_CREATE_UNKNOWN`
+
+**Meaning.** `up` or `run` sent a create that Ubicloud answered with a 5xx or not at all, and could not settle whether the VM is this call's: either the lookup by name never answered within `UBI_CREATE_GRACE` seconds, or a VM answers to the name but this call's ssh key did not open it within `UBI_SSH_WAIT` seconds. Another caller can take an explicit `-n` name between the name check and the create, so a VM found after an unanswered create is not destroyed until this call's key proves it is ours. The VM's record and recovery bundle stay, nothing destroys it, and `run` prints `left=unknown`. **Fix.** Run `scripts/ubicloud/ubi-runner.sh list` to see the VM and its owner. Run `down <name>` only when you know the VM is yours, because `down` destroys whatever answers to the name. This owner's reap destroys an unconfirmed VM once its `-t<hours>` TTL ends.
+
+<a id="ubi-attach-unknown"></a>
+### `UBI_ATTACH_UNKNOWN`
+
+**Meaning.** A rerun of `run` found a run record whose VM the Ubicloud API could not check (an answer other than 200 or 404), so it refused to start a second VM that would leave the first one billing. Nothing was created. **Fix.** Rerun once the API answers.
 
 ## Per-repo cleanup (gstack-clean)
 

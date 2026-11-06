@@ -258,7 +258,7 @@ never credentials, private payloads or an entire unreviewed agent transcript.
 |------|--------------|---------------|
 | 1 — Static | `bun run test` (free) | Command validation, snapshot flags, Aside contract pins, render-wrapper option mapping, SKILL.md correctness, TODOS-format.md refs, observability unit tests |
 | 2 — E2E | The sharded paid runner (`bun run eval:bg:pr`, `eval:bg:release`) | Full skill execution via `claude -p`, PTY and Agent SDK sessions |
-| 3 — LLM eval | The same runner; `test/skill-llm-eval*.test.ts` | LLM-as-judge scoring of generated SKILL.md docs |
+| 3 — LLM judge | Inside paid cases, through `test/helpers/llm-judge.ts` | A model scores what a paid run produced |
 
 Pick commands from [Which command do I run?](#which-command-do-i-run).
 
@@ -551,23 +551,19 @@ Artifacts are never cleaned up — they accumulate in `~/.gstack-dev/` for post-
 
 ### Tier 3: LLM-as-judge
 
-Uses `claude-fable-5-1` by default to score generated SKILL.md docs on three dimensions.
-Override the judge model per run with `GSTACK_EVAL_MODEL_JUDGE`:
+No test asks a model to grade skill text. The judges that remain score what an
+agent produced, inside their own paid cases (for example
+`test/llm-judge-recommendation.test.ts` and the outcome judges in the QA and design
+E2E files). Facts that several skills must state the same way are checked for free
+instead, for example `test/review-bot-history-facts.test.ts`.
 
-- **Clarity** — Can an AI agent understand the instructions without ambiguity?
-- **Completeness** — Are all commands, flags, and usage patterns documented?
-- **Actionability** — Can the agent execute tasks using only the information in the doc?
-
-Each dimension is scored 1-5 by a panel of 3 samples of the same prompt, drawn
-concurrently; each dimension's panel median (at least 2 of 3 samples) must meet
-that judge's threshold (≥ 4 for most dimensions; see each case). An erroring sample fails the panel. There's also a regression test that compares generated docs against the hand-maintained baseline from `origin/main` — generated must score equal or higher.
-
-Needs `ANTHROPIC_API_KEY` in `.env`. The judge files run in every paid lane
-(`bun run eval:bg:pr` selects the ones your diff touches).
-
-- Resolves the judge model through `lib/eval-model.ts`, using the override order above
-- Tests live in `test/skill-llm-eval.test.ts`
-- Calls the Anthropic API directly (not `claude -p`), so it works from anywhere including inside Claude Code
+The judge model defaults to `claude-fable-5-1`; override it per run with
+`GSTACK_EVAL_MODEL_JUDGE` (resolved through `lib/eval-model.ts`, using the override
+order above). Each scored dimension is a panel of 3 samples of the same prompt, drawn
+concurrently; each dimension's panel median (at least 2 of 3 samples) must meet that
+case's threshold. An erroring sample fails the panel. Needs `ANTHROPIC_API_KEY`.
+`test/helpers/llm-judge.ts` calls the Anthropic API directly (not `claude -p`), so it
+works from anywhere including inside Claude Code.
 
 ### Paid-test touchfiles
 
@@ -919,7 +915,11 @@ This affects all projects. To revert: `git checkout main && git pull && bun run 
 An issue is open, parked or closed, and closed means fixed, duplicate or won't
 fix, each with its reason in the closing comment. An issue we intend to fix
 later stays open under the `parked` label with one comment saying where it is
-tracked (a TODOS.md theme or a tracking issue) and what fixes it. The full rule,
+tracked (a TODOS.md theme or a tracking issue) and what fixes it. An agent
+triaging for the maintainer posts these comments under its bot identity
+(`capy-ai[bot]` on Capy), never the maintainer's own account. On Capy, comment only through
+`tools.pr.comment`, never `gh pr comment`, `gh issue comment` or `gh api`, because
+`gh` runs as the maintainer. The full rule,
 including the labels and the close reasons, is in [docs/triage.md](docs/triage.md).
 
 ## Community PR triage (wave process)
@@ -933,7 +933,8 @@ When community PRs accumulate, batch them into themed waves:
    conflicts for dirty ones, verify with `bun run test && bun run build`
 4. **Close with context** — every closed PR gets a comment explaining
    why and what (if anything) supersedes it. Contributors did real work;
-   respect that with clear communication.
+   respect that with clear communication. An agent running the wave posts
+   these notes under its bot identity, never the maintainer's own account.
 5. **Ship as one PR** — single PR to main with all attributions preserved
    in merge commits. Include a summary table of what merged and what closed.
 
@@ -972,9 +973,10 @@ follows ([docs/captain.md](docs/captain.md#contributions-from-outside-the-crew))
 5. **Close the original with a specific thank-you.** After the port lands,
    comment on their PR with what landed (the port's number and version), what
    you changed and why, and thank them by name for the specific thing they
-   fixed. Then close it. Closing a contribution without landing it is a
-   maintainer's call, never a lane's: ask first, and when the answer is no,
-   say why in the same comment.
+   fixed. Then close it. An agent posts that comment under its bot identity,
+   never the maintainer's own account. Closing a contribution without landing
+   it is a maintainer's call, never a lane's: ask first, and when the answer is
+   no, say why in the same comment.
 
 A port is not a rewrite. If the contributor's approach is one you would not
 land, say that on their PR and close or park it under

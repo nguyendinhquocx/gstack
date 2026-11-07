@@ -193,28 +193,35 @@ the readiness dashboard and the PR body, and never count it as a pass.
   is not.
 - **Numbered findings.** In a reply with a `Verdict:` line, every numbered item
   at the start of a line (`1. x`, `1. **Nonblocking — x**`) is a finding,
-  unless the reply concludes that it found nothing. When one has no readable
+  unless the reply ends with `VERDICT: CLEAN`. When one has no readable
   severity, `FINDINGS:` prints `unspecified` instead of `none` (here and in
   `gstack-outside-voice run`); the verdict still comes from the rules above.
-- **No findings.** A review with no tag and no label is `clean` only when its
-  conclusion says so: the last sentence (or its last ", and" clause), or the
-  `because` clause of its `Recommendation:` line, opens with `NO_FINDINGS`,
-  "No issues found", "I found no actionable regressions" or "I did not find
-  any bugs", with no "but", "however", "except", "other than" or "elsewhere".
-  When other prose comes first, anything after that statement except a
-  predicate ("were found", "is evident") or a colon explanation must scope it
-  to the change as a whole ("in this change", "in the staged changes"); "No
-  issues in the parser." does not conclude the review. A "no issues" phrase
-  anywhere else in the reply does not count. Otherwise the review is
-  `unverified` (see below), never `clean`. A `/codex` consult
-  answer with no severity labels at all is not a review summary and stays
-  `clean`.
+- **The verdict line.** The review and structured gates read `clean` only
+  from the reviewer's last line, exactly `VERDICT: CLEAN` or
+  `VERDICT: FINDINGS`, alone on the reply's last non-empty line and outside a
+  code fence (bold, inline code or a list marker around the whole line is
+  fine). Every outside-review prompt asks for it. Prose is never evidence for
+  `clean`: a reply without that line is
+  [`unverified`](#outside-review-missing-verdict) however plainly it says it
+  found nothing ("No issues found in the diff."), because each prose rule
+  gstack tried let some reply that named a problem pass. A P0 or P1 finding (or
+  a Critical or High label) or a last `Verdict: not ready` still makes the
+  review `findings` whatever the line says, and an earlier
+  `VERDICT: FINDINGS` line makes a closing `VERDICT: CLEAN`
+  [`unverified`](#outside-review-unverified-verdict). With only P2 or P3
+  findings the review passes under either value and `FINDINGS:` names the
+  highest one. `VERDICT: FINDINGS` with no readable severity is
+  [`unverified`](#outside-review-unverified), and under `VERDICT: CLEAN`
+  numbered items are not counted as findings. The `spec` gate reads its
+  `SCORE:` and `AMBIGUITIES:` lines instead, and a `/codex` consult or
+  challenge answer is checked only for whether it ran.
 - **Design proposals** (the design-direction voices in /design-consultation
   and /office-hours) are read with the `proposal` gate: a completed proposal
   needs only its `Recommendation: ... because ...` line.
 
 Outside-review prompts ask the reviewer to label each finding Critical, High,
-Medium or Low, so most reviews land on `findings` or `clean`.
+Medium or Low (or P0-P3) and to end with the verdict line, so most reviews
+land on `findings` or `clean`.
 
 <a id="sourced-helper-location"></a>
 ### `gstack: cannot load gstack-codex-probe` / `gstack: cannot locate <helper> (shell: ...)` / `CODEX_MODE: helper_unavailable`
@@ -358,12 +365,28 @@ next non-blank line is a plain sentence with a `because` reason), a
 
 **Expected result.** `OUTSIDE_STATUS: completed`.
 
+<a id="outside-review-missing-verdict"></a>
+### `... outside review: ran, verdict unverified (the review does not end with the required VERDICT line)`
+
+**Meaning.** The reviewer finished, but its last line is not exactly
+`VERDICT: CLEAN` or `VERDICT: FINDINGS`. gstack reads a pass only from that
+line, never from prose such as "No issues found", so the review is
+`unverified` ([how the verdict is read](#outside-review-verdict)). Replies
+from skills rendered before the line existed land here too.
+
+**What is kept.** The full answer is shown above, and any P0 or P1 finding in it
+still blocks.
+
+**Fix.** Read the output above and decide; it is not a pass, and /ship and
+/review list it as missing coverage. Re-run the review from current skills
+(`./setup` re-renders them), whose prompts ask for the line.
+
 <a id="outside-review-unverified"></a>
 ### `... outside review: ran, verdict unverified (...)` / `OUTSIDE_STATUS: unverified` / `GATE: UNVERIFIED`
 
-**Meaning.** The review completed but had no severity tag or label and gave
-no explicit no-findings conclusion, so no pass or fail can be read from it
-([how the verdict is read](#outside-review-verdict)).
+**Meaning.** The review reports findings, or ends with `VERDICT: FINDINGS`, but
+no finding carries a readable severity tag or label, so no pass or fail can be
+read from it ([how the verdict is read](#outside-review-verdict)).
 
 **What is kept.** The full answer is shown above.
 
@@ -709,7 +732,7 @@ plan; the audit is `not run`.
 <a id="plan-eng-review-not-persisted"></a>
 ### `PERSISTED: no` / `PERSIST: gstack-review-log '{...}'` / `no saved Eng Review: run the PERSIST: line ...`
 
-**Meaning.** /plan-eng-review ran where the caller forbids writes (for example
+**Meaning.** The eng review methodology (`/autoplan`'s eng phase) ran where the caller forbids writes (for example
 a delegating agent keeps the reviewer read-only, so it cannot edit the plan it
 judges). The review completed: it ends `DONE` with `PERSISTED: no`, records
 telemetry `success`, and returns the full report and decision ledger in its
@@ -727,7 +750,7 @@ review-log command with this review's values.
 ~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"plan-eng-review",...}'
 ```
 
-Or rerun /plan-eng-review where it may write its report and log.
+Or rerun /autoplan where it may write its report and log.
 
 **Expected result.** `gstack-review-read` lists the `plan-eng-review` entry and
 /ship's dashboard shows the Eng Review row (CLEAR when its status is `clean`).
@@ -1130,7 +1153,7 @@ refusal line, and later auto-updates go through.
 `/bin/sh`, and a hook that does not parse exits 2, which blocks the tool call
 it guards in every session. Setup parse-checks every hook it registers and
 every hook a skill's frontmatter runs (`/autoplan`, `/careful`, `/freeze`,
-`/guard`, `/investigate` and `/plan-ceo-review`): the shim, the gstack shell
+`/guard` and `/plan-ceo-review`): the shim, the gstack shell
 helpers it sources (such as `careful/bin/hook-extract.sh` and
 `bin/gstack-state-root.sh`), and the TypeScript it runs with its local imports.
 A merge conflict marker line in any of those files fails as `unresolved merge
@@ -2093,6 +2116,78 @@ renderer's error. `shot.html` and `text.md` are still written. Exit 1. With no b
 all the command prints `SHOT_PNG: unavailable (...)` and exits 0 instead.
 
 **Fix.** Screenshot `shot.html` with your own browser at 880 px wide, or use `text.md`.
+
+<a id="plan-record-missing"></a>
+### `PLAN: ... (PLAN_RECORD_MISSING)`
+
+**Meaning.** The PR body has no `Plan:` line, so the PR reads as `Plan: required`
+(docs/captain.md, Plan before build). gstack never guesses from the diff, title or
+changelog whether a change is a feature. Under `plan_record: warn` (the Capy crew default)
+`gstack-ship-queue ready` prints the line and continues; under `require` it refuses.
+
+**Fix.** Copy the brief's Plan line into the PR body:
+`gstack-approvals render --plan "Plan: approved: <run id>"` (or `exempt: bug fix (R65)`) prints it
+under `## Approvals`. A PR whose only changes are changelog fragments needs no line.
+
+<a id="plan-unresolved"></a>
+### `PLAN: ... (PLAN_UNRESOLVED)`
+
+**Meaning.** `Plan: approved: <token>` names no approval row on this machine. A run id must
+match a row source `autoplan:<id>@gate_rev=<n>` in any branch's file of the repository's
+approval store (the state root plus every Drive mirror); a row id must exist and be a plan
+approval, not a `ruled_note`, `review_loop_grant` or `test_lane_exception` row. A public
+repo's `Plan: approved (record r-<id>)` must hash from a row id this machine can read; when it
+is the redacted Approvals block's own id (a hash of a whole record), the message says so.
+
+**Fix.** `gstack-approvals import --autoplan <run dir> --by "<owner>"` after the owner's answer,
+or `gstack-approvals add` with their exact words for a plan approved outside /autoplan, then
+cite the run id or the row id it printed. For a record id, paste the Plan line
+`gstack-approvals render --plan` printed, and run ready where the plan was approved or after
+`gstack-approvals sync`.
+
+<a id="plan-not-approved"></a>
+### `PLAN: ... (PLAN_NOT_APPROVED)`
+
+**Meaning.** The line says `required`, the newest gate revision's row for the cited run is
+pending or rejected, or the gate was answered in an agent's own words (`--words-by`, shown
+as "its own decision (not the owner's words)"). A lane approving its own plan is the skip
+this check exists to catch (GST-1751).
+
+**Fix.** Relay the gate to the owner through the Captain, answer it with their exact words
+(`gstack-autoplan answer … --owner-reply "<words>"`), import it, and cite the run.
+
+<a id="plan-exempt-unknown"></a>
+### `PLAN: ... (PLAN_EXEMPT_UNKNOWN)`
+
+**Meaning.** `Plan: exempt: <reason>` names a reason outside the list: `bug fix`, `s1`,
+`flaky`, `stamp`, `changelog-resolve`, `cap-repin`, `audited-list`, `read-only`,
+or `crew:<rule>` for an exemption a crew's rules file records. A trailing
+parenthetical such as `(R65)` is ignored. A diff of changelog fragments only needs
+no line.
+
+**Fix.** Use the exemption the brief names. A change none of them covers is a feature
+and needs `Plan: required` and a plan run.
+
+<a id="plan-store-unavailable"></a>
+### `PLAN: ... (PLAN_STORE_UNAVAILABLE)`
+
+**Meaning.** The line cites an approval, but this machine has no approval store: no
+state-root `approvals/` directory and no Drive mirror. That is reported apart from a
+missing row, because nothing could be read.
+
+**Fix.** Run `gstack-ship-queue ready` on the lane machine that imported the approval, or
+`gstack-approvals sync` there. `land` checks the plan record `ready` wrote into the READY
+note and does not need the store.
+
+<a id="queue-plan-mismatch"></a>
+### `gstack-ship-queue land: ... (QUEUE_PLAN_MISMATCH)`
+
+**Meaning.** Under `plan_record: require`, land found a READY note with no plan record
+(written before the key, or by a `ready` that refused nothing in warn mode), or a note
+whose Plan line differs from the PR body's current line.
+
+**Fix.** The lane fixes the PR body's Plan line if needed and reruns
+`gstack-ship-queue ready --pr <n>` at the pin.
 
 ## /ship token budget and fresh-context handoffs (gstack-ship-budget)
 
@@ -3701,7 +3796,9 @@ exposes no reader id, so the stage is the unit: every reader of that stage is
 quarantined. Its reply moves to `<out>/quarantine/` (mode 0600), its findings
 leave `merged.jsonl`, and it never reaches the Red Team, the judge, the
 returned output or PR text. `verify` prints `FETCH_VIOLATION:` and refuses
-until the stage has rerun and swept clean.
+until the stage has rerun and swept clean. A test run's fixtures (a root
+carrying `.gstack-test-fixture`, or a repository whose remote resolves to a local
+path through `url.<base>.insteadOf`) print `FETCH_IGNORED:` and never count.
 
 **Fix.** Nothing to rerun by hand: the pass plans one fresh attempt per slot
 (`RERUN:`, readers named `<reader>#2`; not a review round) and the pass program
@@ -4884,6 +4981,16 @@ recommended `b` pending, and `all` now takes them.
 **Fix.** Render again (`gstack-gate render <dir>/gate.json --all`), relay it,
 and answer with `--rec-hash <h>` from that render. Explicit `<id><option>`
 tokens are never refused.
+
+Since GST-1819 the hash also names the run, its reviewed plan's sha256 and each
+item's title and option keys, so a `--rec-hash` from another run's gate with
+the same decision shape is refused too: answer each run with the hash its own
+render printed. A gate written before that (its `gate.json` has no
+`rec_hash_v`) still accepts the hash it printed then, and the answer records
+that hash. That old hash is not bound to its run, so two such gates with the
+same decision shape still accept each other's: re-render a pending one and
+answer with the new hash its render prints. A `recommend` on it moves it to the
+new hash.
 
 <a id="checkpoint-invalid"></a>
 ### `CHECKPOINT_INVALID`
@@ -6368,8 +6475,8 @@ asserts. Under machine load such a test fails without a code change. The
 **Fix.** Assert on the outcome instead: an injected clock, a forced deadline,
 an event or a poll with a deadline. When the bound is the contract, add
 `gstack-timing-ok: <reason>` in a comment on the line or the line above. Never
-raise a bound to make a flake pass; /investigate's flake playbook covers the
-diagnosis.
+raise a bound to make a flake pass; find the timing cause, pin it with a test
+that fails on it, and fix that.
 
 <a id="approval-classes-invalid"></a>
 ### `APPROVAL_CLASSES_INVALID`
@@ -6711,6 +6818,24 @@ reason }` and carry the `Documentation exception: accepted by <owner> <date> via
 `gstack-docs-candidate snapshot --exception .gstack/tmp/docs-audit.json`;
 `gstack-ship-release finish` stops on a blocked audit whose snapshot lacks the
 exception.
+
+<a id="docs-result-invalid"></a>
+### `DOCS_RESULT_INVALID`
+
+**Meaning.** `gstack-docs-candidate result` read the /document-release child's
+last nonempty line and it does not meet /ship Step 14.5's result contract: a key
+is missing, unknown or appears twice once whitespace around keys is trimmed, a
+field has the wrong type, the audit id, schema version or status invariant is
+wrong, or `documentation_section` is empty, a placeholder (such as `"x"`) or
+carries a `## Documentation` heading. Whitespace around a key is trimmed first and reported as
+`KEYS_TRIMMED:`, so `" documentation_section"` counts as `documentation_section`.
+The line names each problem. Nothing was saved: the audit's result cannot be
+used, but this is a malformed reply, not a blocked audit.
+
+**Fix.** Run Step 14.5's one remaining re-audit with the printed `RETRY_NOTE:`
+text appended to its prompt, word for word; it quotes the exact keys. With no
+attempt left, Step 14.5 stops and reports this code and the keys it names
+([ship/sections/documentation.md](../ship/sections/documentation.md)).
 <a id="gstack-pr-wait"></a>
 ## gstack-pr-wait
 

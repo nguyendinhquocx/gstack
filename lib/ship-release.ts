@@ -29,7 +29,9 @@ import { parseReceiptDocs, type ReceiptDocs } from './ship-receipt-docs';
 import { resolveStateRoot } from './state-root';
 import { bumpVersion, cmpVersion, fmtVersion, parseVersion, versionWidth, type Bump } from './version-source';
 import { waitForRun } from './ci-carry';
+import { MIN_POLL_MS } from './gh-poll';
 import { lanesOnlyHeadPolicy } from './pregate/head-policy';
+import { finishPlan } from './plan-record';
 import { PREPUSH_CHECK_IDS } from './pregate/index';
 import { buildRunCheck } from './pregate/run-check';
 import { bin, carryLane, carryNoneLines, evidenceExempt, firstLine, flagReader, fragmentPath, gh, git, hostedOrigin, laneLine, lanes, mappedLanes, recordCiTimeout, releasePaths, Report, runLanes, sh, shipPolicy, shipRunMarker, short, stampedFiles } from './ship-bin-common';
@@ -506,7 +508,11 @@ function docsFresh(cwd: string, base: string, postFile: string, moved: readonly 
 
 /** Steps 15-16; once they pass, the /ship run's preflight marker is cleared, so a full preflight may merge the base again (GST-1204). */
 export async function finish(argv: readonly string[], cwd: string): Promise<Report> {
+  const { flag } = flagReader(argv);
+  const plan = finishPlan(cwd, flag('--base')!, flag('--plan'));
+  if (plan.failure) return new Report().add(plan.line!).stop(`${plan.failure.message} (${plan.failure.code}); fix: ${plan.failure.fix}`);
   const r = await finishStages(argv, cwd);
+  if (plan.line) r.lines.unshift(plan.line);
   const marker = r.exit === 0 && shipRunMarker(cwd);
   if (marker) fs.rmSync(marker, { force: true });
   return r;
@@ -624,7 +630,7 @@ export async function accept(argv: readonly string[], cwd: string): Promise<Repo
   for (const name of [...new Set([...mapped.values()].flatMap(m => m.profiles))]) {
     const p = runCheck.profiles[name];
     if (!p) return r.stop(`ship_lanes_from names ${name}, which is not a run_profiles entry on origin/${base}`);
-    const w = await waitForRun(runCheck.deps, { workflow: p.workflow, events: p.events, head, timeoutMs: waitS * 1000, intervalMs: 15_000, sleep: ms => new Promise(res => setTimeout(res, ms)), clock: Date.now });
+    const w = await waitForRun(runCheck.deps, { workflow: p.workflow, events: p.events, head, timeoutMs: waitS * 1000, intervalMs: MIN_POLL_MS, sleep: ms => new Promise(res => setTimeout(res, ms)), clock: Date.now });
     r.add(`CI_WAIT: ${w.state} ${name} ${'run' in w ? `run=${w.run.id}/${w.run.run_attempt}` : w.reason}`);
     if (w.state === 'running') return r.stop(`${p.workflow} run ${w.run.id} at ${head.slice(0, 12)} is still running: rerun accept (or gstack-ci-carry wait --base ${base} in the background, then accept)`);
     if (w.state === 'red') return r.stop(`${p.workflow} run ${w.run.id} failed (${short(w.failing, 4) || 'no failing job named'}): Step 5 triage on its logs; fix, commit, push, then accept again`);

@@ -13,7 +13,9 @@
  * neither the base land checked nor in the pin), a land note on refs/notes/gstack-trains, and the lock's release. A
  * rerun after GitHub merged goes straight to the tree check.
  */
+import { MIN_POLL_MS, pollDelayMs } from './gh-poll';
 import { runMergedChecks } from './land-merged-checks';
+import { landPlan } from './plan-record';
 import { classifyRelease, RELEASE_BRANCH } from './release-stamp';
 import { versionAtRef } from './restamp';
 import type { ShipPolicy } from './ship-policy';
@@ -160,7 +162,11 @@ export function landDirect(ctx: QueueContext, o: DirectOptions): StepOutput {
     const receipt = bindShippedReceipt(root, `origin/${ctx.base}`, info.body ?? '', o.pr, [o.pin]);
     lines.push(receipt.line, ...(receipt.depthLine ? [receipt.depthLine] : []), ...(receipt.targetedLine ? [receipt.targetedLine] : []));
     if (!receipt.ok) return fail(lines, { code: receipt.code, message: receipt.message, fix: `run /ship at the pin, then gstack-ship-queue ready --pr ${o.pr}` });
-    if (!loadReady(keys, o.pr, o.pin)) return fail(lines, { code: 'QUEUE_NOT_READY', message: `no READY note for #${o.pr} at the pin ${o.pin.slice(0, 12)}`, fix: `the lane runs gstack-ship-queue ready --pr ${o.pr} --no-screen at the pin` });
+    const readyNote = loadReady(keys, o.pr, o.pin);
+    if (!readyNote) return fail(lines, { code: 'QUEUE_NOT_READY', message: `no READY note for #${o.pr} at the pin ${o.pin.slice(0, 12)}`, fix: `the lane runs gstack-ship-queue ready --pr ${o.pr} --no-screen at the pin` });
+    const plan = landPlan({ env: process.env, policyValue: policy.plan_record, record: readyNote.plan, body: info.body ?? '' });
+    if (plan.line) lines.push(plan.line);
+    if (plan.failure) return fail(lines, plan.failure);
   }
   const freeze = activeFreeze(keys);
   const standsDown = freeze?.train === 'backstop' && policy.release_gate !== null;
@@ -235,8 +241,8 @@ export function landDirect(ctx: QueueContext, o: DirectOptions): StepOutput {
     if (lost) return fail(lines, lost);
     const m = ctx.gh(['pr', 'merge', o.pr, method, '--match-head-commit', o.pin]);
     let merge: string | undefined;
-    for (let i = 0; i < (m.ok ? 4 : 1) && !isSha(merge); i++) {
-      if (i) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 3_000);
+    for (let i = 0; i < (m.ok ? 3 : 1) && !isSha(merge); i++) {
+      if (i) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, pollDelayMs(MIN_POLL_MS));
       const after = view(ctx, o.pr);
       merge = 'code' in after || after.state !== 'MERGED' ? undefined : after.mergeCommit?.oid;
     }

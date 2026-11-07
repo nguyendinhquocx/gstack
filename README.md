@@ -111,8 +111,8 @@ Claude: I'm going to push back on the framing. You said "daily briefing
 You:    /plan-ceo-review
         [reads the design doc, challenges scope, runs 10-section review]
 
-You:    /plan-eng-review
-        [ASCII diagrams for data flow, state machines, error paths]
+You:    /autoplan
+        [eng phase: ASCII diagrams for data flow, state machines, error paths]
         [test matrix, failure modes, security concerns]
 
 You:    Approve plan. Exit plan mode.
@@ -136,13 +136,12 @@ gstack is a process, not a collection of tools. The skills run in the order a sp
 
 **Think → Plan → Build → Review → Test → Ship → Reflect**
 
-Each skill feeds into the next. `/office-hours` writes a design doc that `/plan-ceo-review` reads. `/plan-eng-review` writes a test plan that `/qa` picks up. `/review` catches bugs that `/ship` verifies are fixed. Nothing falls through the cracks because every step knows what came before it.
+Each skill feeds into the next. `/office-hours` writes a design doc that `/plan-ceo-review` reads. `/autoplan`'s eng phase writes a test plan that `/qa` picks up. `/review` catches bugs that `/ship` verifies are fixed. Nothing falls through the cracks because every step knows what came before it.
 
 | Skill | Your specialist | What they do |
 |-------|----------------|--------------|
 | `/office-hours` | **YC Office Hours** | Start here. Six forcing questions that reframe your product before you write code. Pushes back on your framing, challenges premises, generates implementation alternatives. Design doc feeds into every downstream skill. |
 | `/plan-ceo-review` | **CEO / Founder** | Rethink the problem. Find the 10-star product hiding inside the request. Four modes: Expansion, Selective Expansion, Hold Scope, Reduction. |
-| `/plan-eng-review` | **Eng Manager** | Lock in architecture, data flow, diagrams, edge cases, and tests. Forces hidden assumptions into the open. |
 | `/plan-design-review` | **Senior Designer** | Rates each design dimension 0-10, explains what a 10 looks like, then edits the plan to get there. AI Slop detection. Interactive — one AskUserQuestion per design choice. |
 | `/plan-devex-review` | **Developer Experience Lead** | Interactive DX review: explores developer personas, benchmarks against competitors' TTHW, designs your magical moment, traces friction points step by step. Scores error messages for the agents that read them ([agent-ready errors](docs/agent-ready-errors.md)). Three modes: DX EXPANSION, DX POLISH, DX TRIAGE. 20-45 forcing questions. |
 | `/design-consultation` | **Design Partner** | Build a complete design system from scratch. Researches the landscape, proposes creative risks, generates realistic product mockups. Writes `DESIGN.md` in the open DESIGN.md format, so impeccable, Google Stitch, and any tool that reads it share one file. |
@@ -150,7 +149,6 @@ Each skill feeds into the next. `/office-hours` writes a design doc that `/plan-
 | `/deslop-shared-libs` | **Shared Code Reviewer** | Find worthwhile shared-code extractions in recent work. Compares up to five opportunities and recommends the best three, with source evidence, reliability gains, and total code savings. Recommendations only. |
 | `/write-skill` | **Skill Editor** | Write a new agent skill or improve one without bloat. A five-step edit ladder (fix the tool first, add nothing the model already does, edit the line instead of appending, lowest level that reaches the agent, rule not story), `gstack-skill-bill` for size per level and growth since the last diet, a drift check that every gstack command and flag a skill names still exists, and full diets proven by a before/after/no-skill test. |
 | `/test-audit` | **Test Auditor** | Sweep existing tests for ones that cost more than they protect: source greps, duplicates, assertion-free probes, test-only exports. Every candidate carries an evidence card; report-only unless you approve a batch. |
-| `/investigate` | **Debugger** | Systematic root-cause debugging. Iron Law: no fixes without investigation. Traces data flow, tests hypotheses, stops after 3 failed fixes. |
 | `/verify` | **Build Loop** | Run the repo's own checks (typecheck, lint, build) and the tests `/ship`'s pre-gate would pick for your change, fix what breaks, repeat until green, then hand off to `/ship`. Asks once before running repo commands; never calls a change green when no test covers it. |
 | `/design-review` | **Designer Who Codes** | Same audit as /plan-design-review, then fixes what it finds. Atomic commits, before/after screenshots. If you have impeccable installed, its engine runs first and every mechanical finding arrives tagged with its rule id. |
 | `/devex-review` | **DX Tester** | Live developer experience audit. Actually tests your onboarding: navigates docs, tries the getting started flow, times TTHW, triggers CLI errors the way an agent meets them (`gstack-error-capture`: no terminal, contained, redacted). Compares against `/plan-devex-review` scores — the boomerang that shows if your plan matched reality. |
@@ -189,7 +187,7 @@ The same `/qa` and `/qa-only` commands test CLIs, APIs, jobs, workers and webhoo
 |-----------------|--------------------------|----------------------------|
 | **End users** (UI, web app, mobile) | `/plan-design-review` | `/design-review` |
 | **Developers** (API, CLI, SDK, docs) | `/plan-devex-review` | `/devex-review` |
-| **Architecture** (data flow, perf, tests) | `/plan-eng-review` | `/review` |
+| **Architecture** (data flow, perf, tests) | `/autoplan` (eng phase) | `/review` |
 | **All of the above** | `/autoplan` (runs CEO → design → DX → eng, auto-detects which apply; eng always last) | — |
 
 ### Power tools
@@ -207,7 +205,7 @@ The same `/qa` and `/qa-only` commands test CLIs, APIs, jobs, workers and webhoo
 | `/setup-gbrain` | **GBrain Onboarding** — from zero to running gbrain in under 5 minutes. PGLite local, Supabase existing URL, or auto-provision a new Supabase project via Management API. MCP registration for Claude Code + per-repo trust triad (read-write/read-only/deny). [Full guide](USING_GBRAIN_WITH_GSTACK.md). |
 | `/sync-gbrain` | **Keep Brain Current** — re-index this repo's code into gbrain via `gbrain sources add` + `gbrain sync --strategy code`, refresh the `## GBrain Search Guidance` block in CLAUDE.md, and auto-remove guidance when the capability check fails. `--incremental` (default), `--full`, `--dry-run`. Idempotent; safe to re-run. |
 | `/gstack-upgrade` | **Self-Updater** — upgrade gstack to latest. Detects global vs vendored install, syncs both, shows what changed. |
-| `/captain` | **Crew Controller** — run many coding agents from one controller: lanes send a READY block and never merge, the controller merges through trains (stamp on call, verify, merge with the expected head), keeps the digest, relays approvals in a fixed shape and runs a daily flaky-fix pass. Also answers to `/crew`. [Team guide](docs/captain.md). |
+| `/captain` | **Crew Controller** (Capy only: [gstack on Capy](#gstack-on-capy)) — run many coding agents from one controller: lanes send a READY block and never merge, the controller merges through trains (stamp on call, verify, merge with the expected head), keeps the digest, relays approvals in a fixed shape and runs a daily flaky-fix pass. Also answers to `/crew`. [Team guide](docs/captain.md). |
 | `/ios-qa` | **iOS Live-Device QA (v1.43.0.0+)** — drive a real iPhone or iPad over USB CoreDevice via an embedded `StateServer` in the app. Read Swift source, codegen typed `@Observable` accessors, run the agent loop. Optional `--tailnet` flag exposes the device to OpenClaw or any HTTP-capable agent on your Tailscale tailnet so remote agents can run iOS QA without ever touching the hardware. Capability-tier allowlist (observe/interact/mutate/restore), per-device session lock, audit log. |
 | `/ios-fix`, `/ios-design-review`, `/ios-clean`, `/ios-sync` | iOS bug-fix loop, designer's-eye HIG audit, debug-bridge cleanup, and accessor resync. See `docs/skills.md`. End-to-end walkthrough: [docs/howto-ios-testing-with-gstack.md](docs/howto-ios-testing-with-gstack.md). |
 
@@ -226,6 +224,10 @@ Beyond the slash commands, gstack ships standalone CLIs (`gstack-egress`, `gstac
 The four setup paths, the per-repo trust policy and memory sync, in brief: [docs/gbrain-quick-tour.md](docs/gbrain-quick-tour.md). **Full monty — every scenario, every flag, every bin helper, every troubleshooting step:** [USING_GBRAIN_WITH_GSTACK.md](USING_GBRAIN_WITH_GSTACK.md)
 
 Other references: [docs/gbrain-sync.md](docs/gbrain-sync.md) (sync-specific guide) • [docs/gbrain-sync-errors.md](docs/gbrain-sync-errors.md) (error index)
+
+## gstack on Capy
+
+On a [Capy](https://capy.ai) machine, `./setup` also loads gstack's crew tools: `/captain` to run many agent threads from one controller, a merge queue that lands verified pull requests, receipts that tie each merge to the head that was reviewed and tested, and spend caps for `/ship` and `/autoplan`. They live in [crew/](crew/README.md) and load only on Capy, so any other install is unchanged by them.
 
 ## Platform notes
 

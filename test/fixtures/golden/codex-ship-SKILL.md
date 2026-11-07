@@ -395,7 +395,7 @@ and outside_status; retain partial coverage. These details do not clear Eng Revi
 
 **3. Choose the historical verdict.** CLEARED requires the selected Eng Review
 to be `clean`, within 7 days and fresh under step 2. Otherwise report NOT CLEARED
-and its missing, stale or open-issue reason. With no Eng Review record, say "no saved Eng Review: run the `PERSIST:` line a read-only /plan-eng-review printed, or rerun it" (docs/troubleshooting.md#plan-eng-review-not-persisted). If `skip_eng_review` is true, show
+and its missing, stale or open-issue reason. With no Eng Review record, say "no saved Eng Review: run the `PERSIST:` line a read-only eng review printed, or rerun /autoplan" (docs/troubleshooting.md#plan-eng-review-not-persisted). If `skip_eng_review` is true, show
 "SKIPPED (global)" for Eng Review and CLEARED for this dashboard.
 This verdict never skips Step 9 or its finding, approval and convergence gates. Continue Step 1 even when history is NOT CLEARED.
 
@@ -423,8 +423,8 @@ VERDICT: {CLEARED or NOT CLEARED} — {reason}
 
 An outside review with status `unverified` or `unavailable` is missing coverage, never a pass.
 
-Over 200 lines, `DIFF:` recommends `/plan-eng-review` or `/autoplan`. `SCOPE: frontend=true` (from
-`gstack-diff-scope <base>`) with no design review: mention "Design Review not run — Step 9 includes the lite check; consider /design-review for a full visual audit."
+Over 200 lines, `DIFF:` recommends `/autoplan`. `SCOPE: frontend=true` (from
+`gstack-diff-scope <base>`) (Lit or htm templates in .ts/.js count) with no design review: mention "Design Review: static (no preview declared) — Step 9 runs the lite check only; consider /design-review on a served page for a visual audit."
 
 Continue to Step 2 without asking; Step 9 applies the review gates.
 
@@ -662,7 +662,7 @@ Make bisectable commits; if already committed, continue to Step 16. Never create
 it. Content changes during or after verification restart at
 stage 1 and complete all five stages before Step 17. Content-preserving commits keep evidence valid.
 
-**One call for stages 1–4:** `$GSTACK_ROOT/bin/gstack-ship-release finish --base <base> --reviewed-tree <tree> --reviewed-base <mb> --docs-post <audit-id>-post.json --lane <label>=<Step 5 command>... [--build <cmd>]... --trailer '<trailer>'`
+**One call for stages 1–4:** `$GSTACK_ROOT/bin/gstack-ship-release finish --base <base> --reviewed-tree <tree> --reviewed-base <mb> --docs-post <audit-id>-post.json --lane <label>=<Step 5 command>... [--build <cmd>]... --trailer '<trailer>' [--plan "<Plan line>"]`
 also makes Step 15's item-3 commit and runs the pregate (`--docs-rechecked`,
 `--no-lanes-approved` record stage 2.2 and Step 5's approval).
 

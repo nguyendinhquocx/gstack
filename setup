@@ -1378,6 +1378,19 @@ bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" "$SOURCE_GSTACK_DIR
 # Priority: CLI flag > saved config > interactive prompt (or flat default for non-TTY)
 GSTACK_CONFIG="$SOURCE_GSTACK_DIR/bin/gstack-config"
 export GSTACK_SETUP_RUNNING=1  # Prevent gstack-config post-set hook from triggering relink mid-setup
+
+# ─── Update channel, first install only (docs/releases.md#channels) ─────────
+# A fresh state root records stable for a user's checkout (or the
+# GSTACK_UPDATE_CHANNEL value); a contributor checkout and every existing
+# install keep auto. Read before anything below writes config.yaml.
+_UC_INITIAL="$(bash "$SOURCE_GSTACK_DIR/bin/gstack-update-channel.sh" --initial "$GSTACK_STATE_ROOT" "$SOURCE_GSTACK_DIR" 2>/dev/null || true)"
+case "$_UC_INITIAL" in
+  stable\ *|main\ *)
+    "$GSTACK_CONFIG" set update_channel "${_UC_INITIAL%% *}" >/dev/null || {
+      echo "Update channel: could not record ${_UC_INITIAL%% *} (gstack-config failed); fix: $INSTALL_GSTACK_DIR/bin/gstack-config set update_channel ${_UC_INITIAL%% *}" >&2
+      _UC_INITIAL=""
+    } ;;
+esac
 if [ "$SKILL_PREFIX_FLAG" -eq 0 ]; then
   _saved_prefix="$("$GSTACK_CONFIG" get skill_prefix 2>/dev/null || true)"
   if [ "$_saved_prefix" = "true" ]; then
@@ -4971,6 +4984,11 @@ _skill_hook_gate skill_routing "$SKILL_ROUTING_MODE" GSTACK_SKILL_ROUTING UserPr
 _skill_hook_gate skill_contracts "$SKILL_CONTRACTS_MODE" GSTACK_SKILL_CONTRACTS Stop \
   "$SKILL_CONTRACT_HOOK" gstack-skill-contract 10 \
   "a contract skill that ends without its required outputs is blocked once"
+# Both skill gates register HOOK_TIMEOUT_S from lib/skill-gates.ts, the longest
+# gate deadline plus a margin (GST-1615): Claude Code kills a hook at its
+# timeout and lets the stop through unchecked. Empty if bun cannot run, which
+# omits the timeout and leaves Claude Code's default.
+SKILL_GATE_HOOK_TIMEOUT="$(bun --no-env-file --config="${GSTACK_BUN_CONFIG:-/dev/null}" "$SOURCE_GSTACK_DIR/bin/gstack-skill-gates" hook-timeout 2>/dev/null || true)"
 # The /investigate gate (GST-1461, docs/skill-gates.md) registers one shim per
 # event; each basename has its own KNOWN_HOOKS row under one source tag.
 INVESTIGATE_GATE_PRE="$(_hook_command_path hosts/claude/hooks/investigate-gate-pre || true)"
@@ -4979,7 +4997,7 @@ INVESTIGATE_GATE_POST_FAILURE="$(_hook_command_path hosts/claude/hooks/investiga
 INVESTIGATE_GATE_STOP="$(_hook_command_path hosts/claude/hooks/investigate-gate-stop || true)"
 INVESTIGATE_GATE_EDIT_MATCHER="Edit|Write|MultiEdit|NotebookEdit|Bash"
 _skill_hook_gate investigate_gate "$INVESTIGATE_GATE_MODE" GSTACK_INVESTIGATE_GATE PreToolUse \
-  "$INVESTIGATE_GATE_PRE" gstack-investigate-gate 10 \
+  "$INVESTIGATE_GATE_PRE" gstack-investigate-gate "$SKILL_GATE_HOOK_TIMEOUT" \
   "after /investigate loads, changes to tracked source wait for a stated root cause" \
   "$INVESTIGATE_GATE_EDIT_MATCHER" \
   PostToolUse "$INVESTIGATE_GATE_POST" Bash \
@@ -4990,7 +5008,7 @@ _skill_hook_gate investigate_gate "$INVESTIGATE_GATE_MODE" GSTACK_INVESTIGATE_GA
 CEO_REVIEW_GATE_STOP="$(_hook_command_path hosts/claude/hooks/ceo-review-gate-stop || true)"
 CEO_REVIEW_GATE_SUBAGENT_STOP="$(_hook_command_path hosts/claude/hooks/ceo-review-gate-subagent-stop || true)"
 _skill_hook_gate ceo_review_gate "$CEO_REVIEW_GATE_MODE" GSTACK_CEO_REVIEW_GATE Stop \
-  "$CEO_REVIEW_GATE_STOP" gstack-ceo-review-gate 10 \
+  "$CEO_REVIEW_GATE_STOP" gstack-ceo-review-gate "$SKILL_GATE_HOOK_TIMEOUT" \
   "after /plan-ceo-review loads, its final stop waits for ranked top risks in the output file" "" \
   SubagentStop "$CEO_REVIEW_GATE_SUBAGENT_STOP" ""
 
@@ -5055,6 +5073,14 @@ if ! grep -q '^redact_prepush_hook:' "$_GSTACK_CFG_FILE" 2>/dev/null; then
     log "     Enable once: gstack-config set redact_prepush_hook true — /ship"
     log "     installs the hook automatically in every repo you ship from."
   fi
+fi
+
+if [ -n "$_UC_INITIAL" ]; then
+  _UC_NOW="$(bash "$SOURCE_GSTACK_DIR/bin/gstack-update-channel.sh" "$SOURCE_GSTACK_DIR" 2>/dev/null || echo main)"
+  _UC_WHY="${_UC_INITIAL#* }"
+  [ "${_UC_INITIAL%% *}" = auto ] && [ "$_UC_NOW" = stable ] && _UC_WHY="team mode"
+  log ""
+  log "Update channel: $_UC_NOW ($_UC_WHY). Switch: $INSTALL_GSTACK_DIR/bin/gstack-config set update_channel $([ "$_UC_NOW" = main ] && echo stable || echo main) (docs/releases.md#channels)"
 fi
 
 _setup_print_summary

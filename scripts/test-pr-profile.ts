@@ -252,6 +252,7 @@ export const FREE_ONLY_PR_FILES = [
   '.gstack/pregate.json', // gstack's own pre-gate policy: same trust boundary, same reason.
   '.gstack/ship-policy.json', // gstack's own ship policy: gstack-ship-policy/gstack-restamp read it from origin/<base> of the repo they run in; same reason.
   '.gstack/ship-policy.example.json', // The example beside it: only .gitignore and docs/ship-policy.md name it.
+  '.gstack/plain-titles.json', // gstack's own plain-title policy: gstack-plain-title reads it from the repo it runs in and the Plain title check from the base branch; paid cases run in fixture repos.
   '.github/dependabot.yml', // Dependabot's own config: read by GitHub, and by free test/compare-pr-version.test.ts; dependabot runs skip the paid lane.
   '.osv-scanner.toml', // Read by .github/workflows/osv-scanner.yml and the free OSV tests (test/osv-*.test.ts).
   'setup.ps1', // The Windows installer: run only by .github/workflows/windows-setup-e2e.yml; the paid lane is Linux.
@@ -280,6 +281,7 @@ export const FREE_ONLY_PR_FILES = [
   '.github/workflows/native-qualification.yml',
   '.github/workflows/osv-scanner.yml',
   '.github/workflows/platform-qualification.yml',
+  '.github/workflows/plain-title.yml',
   '.github/workflows/pr-title-sync.yml',
   '.github/workflows/quality-gate.yml',
   '.github/workflows/scorecard.yml',
@@ -289,7 +291,7 @@ export const FREE_ONLY_PR_FILES = [
   '.github/workflows/evals-main-backstop.yml', // The merge-train backstop on main: it dispatches evals.yml after a push to main; no PR-gate case reads it, and it never gates a PR.
   '.github/workflows/release-gate.yml', // The 8-hour release gate on main: it dispatches evals.yml on main's head; no PR-gate case reads it, and it never gates a PR.
   '.github/workflows/weekly-release.yml', // The Monday release cut (tag, stable, GitHub Release): reads check runs on main; no paid case reads it, and it never gates a PR.
-  'scripts/release-cut.ts', // The release cut's logic, run only by weekly-release.yml; covered by the free test/release-cut.test.ts.
+  'crew/scripts/release-cut.ts', // The release cut's logic, run only by weekly-release.yml; covered by the free crew/test/release-cut.test.ts.
   '.github/actionlint.yaml', // Runner labels for actionlint only.
   'scripts/ship-measure-sweep.ts', // The weekly sweep CLI; it launches paid cases, never runs inside one.
   '.github/workflows/version-gate.yml',

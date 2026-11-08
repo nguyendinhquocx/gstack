@@ -18,7 +18,7 @@
  *
  * `write` validates against `gstack-artifact schema ship-receipt`, prints the
  * fenced block (and SHIP_RECEIPT: <identifiers> on stderr), writes it to --out,
- * and with --body makes it the first section of that PR body file.
+ * and with --body puts it in that PR body file's Agent notes section (lib/agent-notes.ts).
  * `result` is /ship's terminal step: it binds the receipt to HEAD, writes the
  * run record under <state>/ship/runs/ (ship-run.json: a /ship record, not a
  * `run` v1 manifest, so `gstack-artifact validate` does not apply to it) and
@@ -46,12 +46,12 @@ import { installedGstackVersion, isUnavailable, loadPolicyFromBase, matchesAny, 
 import { approvalForReceipt } from '../lib/approval-citations';
 import {
   CARRY_METADATA_GLOBS, CARRY_NAMED_PATHS, CARRY_TEST_GLOBS,
-  bindReceipt, carryReceipt, classifyCarryPath, computeCensus, extractReceipt, landedStackParent, missingIssueLines, orderReceipt, parseReviewLoop, placeReceiptFirst, planCarry, planTreeCarry,
+  bindReceipt, carryReceipt, classifyCarryPath, computeCensus, extractReceipt, landedStackParent, missingIssueLines, orderReceipt, parseReviewLoop, placeReceipt, planCarry, planTreeCarry,
   receiptIssuesFrom, receiptSummaryLine, renderCensus, renderReceiptBlock, validateReceipt, type CensusPr,
 } from '../lib/ship-receipt';
 import { checkDocsCaps, docsCapLine, docsExceptionLine, parseReceiptDocs } from '../lib/ship-receipt-docs';
 import { comparePath, contextPacket, PACKET_SECTION_CAP, readScopedReview, touchedPaths } from '../lib/ship-patch';
-import { planRecheck, readRecheck, recheckPacket, recheckRecordTemplate } from '../lib/ship-recheck';
+import { planRecheck, readRecheck, recheckPacket, recheckRecordTemplate } from '../crew/lib/ship-recheck';
 import { carryExcludeBinds, deeper, depthBelow, exceptionHead, exceptionLoopProblem, exceptionProblems, parseReviewLoopException, parseReviewTargeted, plainDocsSince, platformReceiptDepth, receiptExclude, receiptReviewAtHead, receiptTargetedAtHead, reviewLoopExceptionLine, targetedClassesSince, writeExcludeBinds } from '../lib/ship-receipt-depth';
 import { RISK_CLASSES, type RiskClass } from '../lib/review-risk';
 import { checkReceiptProse, proseLine } from '../lib/ship-receipt-prose';
@@ -64,7 +64,7 @@ import { isRegistryUnavailable, loadRegistryFromBase } from '../lib/regen';
 
 const HELP = `gstack-ship-receipt — the \`\`\`gstack-ship-receipt\`\`\` block (docs/ship-policy.md#ship-receipt)
 
-  write [flags]                       compose, validate and print the block; --body <file> puts it first in that PR body;
+  write [flags]                       compose, validate and print the block; --body <file> puts it in that PR body's Agent notes;
                                       --base-red <pause.json> makes it conditional (gstack-base-red classify --pause)
   read --pr <n> [--repo <r>]          parse the block from the PR body through gh (RECEIPT_MISSING / RECEIPT_INVALID)
   read --body <file>                  parse the block from a file
@@ -298,7 +298,7 @@ function cmdWrite(rest: string[], json: boolean): number {
   const product = reviewedProduct(repoRoot, base, head, pregateFile);
   let targeted: ReturnType<typeof parseReviewTargeted> | undefined;
   if (flag(rest, '--review-targeted') !== undefined) {
-    try { targeted = parseReviewTargeted(jsonArg(flag(rest, '--review-targeted')), product.product_patch_id ?? 'none', read => reviewedProduct(repoRoot, base, read, pregateFile).product_patch_id, read => targetedClassesSince(repoRoot, read, headSha ?? head, base), read => plainDocsSince(repoRoot, read, headSha ?? head, base), read => spawnSync('git', ['merge-base', '--is-ancestor', read, headSha ?? head], { cwd: repoRoot, timeout: 30_000 }).status === 0); } catch (e: any) { targeted = { ok: false, message: `--review-targeted: ${e.message}` }; }
+    try { targeted = parseReviewTargeted(jsonArg(flag(rest, '--review-targeted')), product.product_patch_id ?? 'none', read => reviewedProduct(repoRoot, base, read, pregateFile).product_patch_id, read => targetedClassesSince(repoRoot, read, headSha ?? head, base, review.exclude.state === 'active' ? review.exclude.excluded : undefined), read => plainDocsSince(repoRoot, read, headSha ?? head, base), read => spawnSync('git', ['merge-base', '--is-ancestor', read, headSha ?? head], { cwd: repoRoot, timeout: 30_000 }).status === 0); } catch (e: any) { targeted = { ok: false, message: `--review-targeted: ${e.message}` }; }
   }
   if (targeted && !targeted.ok) { process.stderr.write(resultLine('gstack-ship-receipt write', 'RECEIPT_INVALID', `${targeted.message}; nothing written`) + '\n'); return EXIT.fail; }
   const approval = approvalForReceipt({ repoRoot, base, head, citationText: [bodyText, ...flags(rest, '--approval')].join('\n'), runDirs: flags(rest, '--approval-run') });
@@ -361,7 +361,7 @@ function cmdWrite(rest: string[], json: boolean): number {
   const block = renderReceiptBlock(receipt);
   const out = flag(rest, '--out');
   if (out) fs.writeFileSync(out, block);
-  if (body) fs.writeFileSync(body, placeReceiptFirst(fs.existsSync(body) ? fs.readFileSync(body, 'utf8') : '', receipt));
+  if (body) fs.writeFileSync(body, placeReceipt(fs.existsSync(body) ? fs.readFileSync(body, 'utf8') : '', receipt));
   process.stderr.write(receiptSummaryLine(receipt) + '\n');
   process.stdout.write(json ? JSON.stringify(receipt) + '\n' : block);
   return EXIT.ok;
@@ -845,7 +845,7 @@ function cmdCarry(rest: string[], json: boolean): number {
     // Evidence for the record, never the decision: a slow range-diff is reported unavailable rather than waited for.
     const rangeRaw = spawnSync('git', ['range-diff', '--no-color', `${rangeBase}..${from}`, `${headBase}..${head}`], { cwd: repoRoot, encoding: 'utf8', timeout: 15_000, maxBuffer: 64 * 1024 * 1024 });
     const rangeDiff = rangeRaw.status === 0 ? (rangeRaw.stdout.trim().split('\n').slice(0, 20).join('\n') || '(empty: identical ranges)') : `unavailable: ${(rangeRaw.stderr ?? '').trim().split('\n')[0] || (rangeRaw.signal ? `range-diff killed by ${rangeRaw.signal} after 15 s` : 'range-diff failed')}`;
-    // J1: a bounded product change since the reviewed head gets one reader on the range-diff instead of a full /ship (lib/ship-recheck.ts).
+    // J1: a bounded product change since the reviewed head gets one reader on the range-diff instead of a full /ship (crew/lib/ship-recheck.ts).
     if (changedProduct.length) {
       const named = changedProduct.filter(p => !p.startsWith('(') && !p.includes(' ('));
       const inter = named.length ? spawnSync('git', ['diff', '--no-color', '--no-ext-diff', from, head, '--', ...named.map(p => `:(literal)${p}`)], { cwd: repoRoot, encoding: 'utf8', timeout: 30_000, maxBuffer: 64 * 1024 * 1024 }) : null;
@@ -916,7 +916,7 @@ function cmdCarry(rest: string[], json: boolean): number {
   if (errors.length) return refused('RECEIPT_CARRY_REFUSED', `the carried receipt does not validate: ${errors[0]!.message} at ${errors[0]!.path}`);
   const targetedVerdict = receiptTargetedAtHead(repoRoot, baseRef, carried, head);
   if (!targetedVerdict.ok) return refused('RECEIPT_CARRY_REFUSED', `${targetedVerdict.line}: ${targetedVerdict.message}, so the queue refuses it too (#3859); run /ship on ${head.slice(0, 12)}`);
-  const newBody = placeReceiptFirst(body, carried);
+  const newBody = placeReceipt(body, carried);
   const line = receiptSummaryLine(carried);
   if (scopedDryRun) return refused('RECEIPT_CARRY_SCOPED_REVIEW', scopedDryRun);
   if (rest.includes('--dry-run')) {

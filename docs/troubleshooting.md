@@ -1689,6 +1689,26 @@ user-namespace error needs `GSTACK_CHROMIUM_NO_SANDBOX=1`; then re-run
 `<checkout>/bin/gstack-browser-ensure`. `--with-browser` on the installer
 front-loads the install on machines that want it now.
 
+<a id="chromium-sandbox-unavailable"></a>
+### `Chromium could not start its sandbox: this Linux host does not let unprivileged users create user namespaces …`
+
+**Meaning.** Chromium aborted with `No usable sandbox!` (its own line is
+printed below gstack's). The host denies unprivileged user namespaces: stock
+Ubuntu 23.10+ under AppArmor, a container's seccomp profile, or
+`user.max_user_namespaces=0`. browse prints it after `Server failed to
+start:`, and `gstack-design-build preflight` prints it as
+`DESIGN_BUILD: unrendered code=BROWSER_SANDBOX`. gstack never turns the
+sandbox off on its own: it already does so for root, CI, `CONTAINER` and
+Docker's `/.dockerenv`, and everywhere else that is your call.
+
+**Fix.** Either allow unprivileged user namespaces (on Ubuntu,
+`sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` or an
+AppArmor profile for Chromium, per the link in Chromium's line; elsewhere,
+raise `user.max_user_namespaces`), or set `GSTACK_CHROMIUM_NO_SANDBOX=1` in
+the shell that runs gstack. Use the variable only for pages you trust: without
+the sandbox, a page that exploits a Chromium bug can reach your files and
+accounts. Then rerun.
+
 <a id="capy-install-preflight-failed"></a>
 ### `gstack-capy-install: preflight: <tool> not found (INSTALL_PREFLIGHT_FAILED; ...)`
 
@@ -2121,7 +2141,7 @@ all the command prints `SHOT_PNG: unavailable (...)` and exits 0 instead.
 ### `PLAN: ... (PLAN_RECORD_MISSING)`
 
 **Meaning.** The PR body has no `Plan:` line, so the PR reads as `Plan: required`
-(docs/captain.md, Plan before build). gstack never guesses from the diff, title or
+(crew/docs/captain.md, Plan before build). gstack never guesses from the diff, title or
 changelog whether a change is a feature. Under `plan_record: warn` (the Capy crew default)
 `gstack-ship-queue ready` prints the line and continues; under `require` it refuses.
 
@@ -3761,15 +3781,15 @@ and ask a person with the log file.
 <a id="review-plan-stopped"></a>
 ### `REVIEW_PLAN_STOPPED`
 
-**Meaning.** `gstack-review-dispatch pass` runs `gstack-review-plan` before it
-writes a manifest, and that run did not finish, so the pass stopped (exit 1)
-without dispatching a reader. The line names the step (the plan command),
-`reason=timeout` with `timeout_ms` (180,000 ms; `GSTACK_REVIEW_PLAN_TIMEOUT_MS`
-sets it in milliseconds), `reason=signal` with the signal when something else
+**Meaning.** `gstack-review-plan` did not finish inside its limit, so it printed
+no plan, or `gstack-review-dispatch pass`, which runs it before it writes a
+manifest, stopped without dispatching a reader (exit 1 either way). The line
+names the step (the plan command), `reason=timeout` with `timeout_ms` (180,000
+ms; `GSTACK_REVIEW_PLAN_TIMEOUT_MS` sets it in milliseconds), `reason=signal` with the signal when something else
 killed it, or `reason=spawn` when it could not start. Before this line existed, a
 plan that ran past the limit was killed with no output (GST-1442).
 
-**Fix.** Rerun the pass once unchanged. If it stops again, report the line and the
+**Fix.** Rerun once unchanged. If it stops again, report the line and the
 repository's file count (`git ls-files | wc -l`) to your Captain. For
 `reason=signal`, check the machine's free memory first.
 
@@ -4221,7 +4241,9 @@ anchored pattern and a reason ([docs/pregate.md](pregate.md#allowlist));
 ### `PREGATE_STRAYS`
 
 **Meaning.** A file was added at the repository root, in a new top-level
-directory, or under a scratch name (`zz-*`, `tmp*`, `scratch*`) or an editor
+directory, or under a scratch name (`zz-*`, or `tmp` or `scratch` as the whole
+name stem, optionally numbered: `tmp.js`, `tmp2.js`, `tmp_1.txt`, `scratch.md`,
+but not `tmp-watch.js`, `tmpfs-mount.js`, `scratchpad.ts` or `tmp-repro.ts`) or an editor
 leftover name (`*.orig`, `*.rej`, `*.swp`, `*.swo`, `*.bak`, `*.tmp`, `*~`,
 `.DS_Store`, `Thumbs.db`).
 
@@ -6437,7 +6459,7 @@ ran no slice. evals.yml's `route` job plans nothing when
 between `ready --screen` and the plan) or when the plan selects no case; the
 run then uploads no `paid-plan` artifact (or an empty manifest), every slice
 job is skipped and GitHub shows a green check. On 2026-10-26, 18 of 41 PR
-screens ended this way. The verdict is read from the run (`lib/ship-queue-screen.ts`),
+screens ended this way. The verdict is read from the run (`crew/lib/ship-queue-screen.ts`),
 so such a run is `NOT-RUN`: `verify --pr <n> --screen` prints
 `SCREEN_VERDICT: #<n> run <id> NOT-RUN (<why>)` and refuses with this code, the
 READY receipt records `screen.verdict.outcome: NOT_RUN`, `ready --screen` never
@@ -6568,7 +6590,8 @@ record's start time and that each pass was finished with `via:"ship"`.
 **Meaning.** `gstack-review-scope classify` could not read the diff it scopes
 findings against: `origin/<base>` or `--range-base` does not resolve, or the
 range base is not an ancestor of HEAD (history was rewritten since the previous
-pass).
+pass), or `git diff` over that range failed, and the line names git's error or
+the 120-second timeout.
 
 **Fix.** Fetch `origin/<base>`, check `--range-base` against the pass heads in
 the invocation record, and start a full pass (`--pass 1`) when the branch was
@@ -6734,7 +6757,7 @@ route (Step 1.4)`.
 can't carry as it is. When the history is linear, the base is the one the
 receipt was reviewed against, and `git range-diff` of the reviewed range
 against the current one is at most 400 lines (`RECHECK_RANGE_DIFF_CAP` in
-`lib/ship-recheck.ts`), carry also prints `RECHECK: eligible
+`crew/lib/ship-recheck.ts`), carry also prints `RECHECK: eligible
 range_diff_lines=N range_diff_sha256=<sha> packet=<file>`: one reader on that
 range-diff can clear it instead of a full second /ship. A rebased branch
 (`RECEIPT_CARRY_TREE_MISMATCH`), a retargeted stack, a receipt with no
@@ -7377,3 +7400,37 @@ These codes come from `bin/gstack-clean`, which reclaims old codex scratch in `<
 ### `RUNAWAY_INPUT: file=<path> …` (gstack-runaway)
 
 **Meaning.** That thread's file is not valid JSON, or lacks `cost.tokens`, a parseable `created_at` or numeric `tasks[].cost.tokens`. The thread is skipped (never counted as OK), the rest of the sweep still runs, `SWEEP:` counts it as `unreadable`, and the exit is 1. **Fix.** Fetch that thread again with `tools.thread.get` (the whole object, not a summary) and rerun the scan.
+
+## Plain titles (gstack-plain-title)
+
+These codes come from `bin/gstack-plain-title`, which /ship, gstack-post and the "Plain title" CI check run so that PR titles, branch names, PR openings, changelog entries and commit subjects say in everyday words what changed. The rules are in [ship-policy.md](ship-policy.md#plain-titles); the word list is the repository's `.gstack/plain-titles.json`. Each finding prints as `PLAIN_TITLE: <CODE> <kind> "<match>" — <hint>`, naming only the matched words, never the whole title or body.
+
+<a id="plain-title-refused"></a>
+### `PLAIN_TITLE: PLAIN_TITLE_REFUSED <kind> "<match>" — …`
+
+**Meaning.** The front of the PR title (everything before one optional trailing group of references such as `(GST-1713)` or `(#4122)`) holds a tracker code, a word from the policy's `terms` list, or a `word(scope):` prefix. Exit 1; gstack-post posts nothing, and the CI check fails. **Fix.** Rewrite the title as a plain sentence about what changed for someone using the project, for example "Stop gstack from hitting GitHub's rate limit while it waits on PRs (GST-1713)". Editing the title reruns the CI check.
+
+<a id="plain-branch-refused"></a>
+### `PLAIN_TITLE: PLAIN_BRANCH_REFUSED <kind> "<match>" — …`
+
+**Meaning.** The branch name holds a tracker code or a listed word before its last segment. Hyphens and underscores count as spaces, one tracker code at the very end is fine (`capy/github-rate-limit-gst-1713`), and branches gstack generates (`release/`, `wave/`, `gstack-land-repair/`) are exempt. /ship refuses it before the first push; CI only warns, since a pushed branch cannot be renamed in place. **Fix.** Name the next branch in plain words; for this one, open a new branch only if the PR has not been pushed yet.
+
+<a id="plain-opening-refused"></a>
+### `PLAIN_TITLE: PLAIN_OPENING_REFUSED <kind> "<match>" — …`
+
+**Meaning.** The readable part of the PR body (everything above the `<!-- gstack:agent-notes -->` marker) does not start with a plain paragraph: it starts with a heading, code block, list, table, HTML or image, runs past two sentences, or names a tracker code or listed word. /ship refuses it; CI only warns. **Fix.** Start the body with one or two sentences saying what changed and which goal of the project it serves. Move codes and records into the Agent notes section at the end.
+
+<a id="plain-changelog-refused"></a>
+### `PLAIN_TITLE: PLAIN_CHANGELOG_REFUSED <kind> "<match>" — …`
+
+**Meaning.** The changelog entry holds a tracker code, or its bold lead holds a listed word. Code spans, code blocks, links and quoted words are skipped. **Fix.** Drop tracker codes from the entry and rewrite the bold lead in everyday words.
+
+<a id="plain-commit-refused"></a>
+### `PLAIN_TITLE: PLAIN_COMMIT_REFUSED <kind> "<match>" — … (warning only)`
+
+**Meaning.** A commit subject on the PR breaks the title rule. This is always a warning: the squash commit on main takes the PR title, which the title check already guards. **Fix.** Write later commit subjects as plain sentences; nothing needs rewriting now.
+
+<a id="plain-policy-invalid"></a>
+### `gstack-plain-title: .gstack/plain-titles.json is not valid JSON or breaks the schema … (PLAIN_POLICY_INVALID)`
+
+**Meaning.** The policy file does not parse, has an unknown key, a `codes` entry that is not a valid regex or matches empty text, an `allow` entry without a reason, or a `since` that is not a date. Exit 3; nothing was checked. **Fix.** Fix the key the line names, then run `gstack-plain-title validate`.

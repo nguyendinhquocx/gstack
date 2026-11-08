@@ -365,6 +365,8 @@ This is my **designer who codes mode**.
 
 It runs an 80-item visual audit on your live site — in your Aside browser, so it sees exactly what a logged-in you sees — then enters a fix loop: for each design finding, it locates the source file, makes the minimal CSS/styling change, commits with `style(design): FINDING-NNN`, re-navigates to verify, and takes before/after screenshots. One commit per fix, fully bisectable.
 
+**`--build` (opt-in, for UI you are building).** `/design-review --build <preview url>` skips the clean-tree check and never commits: it lists the states your change can show, serves them on a loopback preview with canned API answers ([preview recipe](howto-preview-a-frontend.md)), lints each one with `gstack-design-lint --scope app` at 1440 and 375, screenshots them, fixes what fails for up to three rounds, then runs one read-only final pass. `gstack-design-build` turns that evidence into one `DESIGN_BUILD:` line (clean, waived, open, incomplete or unrendered); a skipped render, a state it could not reach or an API call the preview could not answer is never clean.
+
 The self-regulation heuristic is tuned for design work — CSS-only changes get a free pass (they are inherently safe and reversible), but changes to component JSX/TSX files count against the risk budget. Hard cap at 30 fixes. If the risk score exceeds 20%, it stops and asks.
 
 **Design detector.** When you have [impeccable](https://impeccable.style) installed, its engine runs first: on a URL the page's rendered DOM is dumped (linked styles inlined) and scanned; on a feature branch with no URL the changed frontend files are scanned (`.dart` files excepted: they count as frontend scope, but the engine reads web sources). Every mechanical finding arrives as a `FINDING-NNN` tagged with its rule id (`[nested-cards]`, `[low-contrast]`), and the report closes with `Detector: N → M`. gstack never runs impeccable's installer; when no engine is present it offers, once, to download the engine binary (checksum-pinned, logged in the egress ledger) and remembers the answer; without it the audit is unchanged. `gstack-config set design_detector off` disables the pre-pass.
@@ -698,14 +700,14 @@ A lot of branches die when the interesting work is done and only the boring rele
 
 ### The PR body
 
-`/ship` writes the PR body from the diff, the receipt and the review, and a reader who was not in the session decides the merge from it. On Capy (`CAPY_PR: on`) the body opens with four sections, in this order, before the standard Summary, Test plan and Documentation sections:
+`/ship` writes the PR body from the diff, the receipt and the review, and a reader who was not in the session decides the merge from it. The front is for people and the end is for machines: the body opens with one or two plain sentences saying what changed for someone using the project and which README goal it serves, and it ends with one collapsed **Agent notes** section (`<!-- gstack:agent-notes -->` then `<details><summary>Agent notes</summary>`) that holds the ship receipt, the approval and Plan lines, issue codes and the review-loop lines gstack's tools read. The title follows the same shape: plain words first, an issue code only at the end (`Stop gstack from hitting GitHub's rate limit while it waits on PRs (GST-1713)`), checked by `gstack-plain-title` (see [Plain titles](ship-policy.md#plain-titles)). On Capy (`CAPY_PR: on`) the opening is followed by three sections, in this order, before the standard Summary, Test plan and Documentation sections:
 
 1. **`## What changed`**: one to three captioned before/after images from `gstack-pr-shots` or a UI screenshot, highest-signal first, with a collapsed text version under each.
 2. **`## Why`**: two or three sentences. The first states the problem in the person's words (the issue, the message, the failing run), then the cause and the user-visible effect.
 3. **`## Blast radius`**: what else the change touches and the one fact that makes that safe, with the evidence-ladder rung that fact reached (a test that exercises the shared path, a grep over every caller, a measured run). A change to a shared helper, a generated file, a selection list or a policy default always has one; a leaf fix says so in one line.
-4. **`## Approvals`**: the output of `gstack-approvals render`, verbatim. On a private repository that is the table; on a public repository, or one whose visibility gh cannot read, it is only `Approved: yes|no (record <id>)`, because GitHub keeps every earlier version of a PR description.
+`## Approvals`, the output of `gstack-approvals render` verbatim, goes inside Agent notes. On a private repository that is the table; on a public repository, or one whose visibility gh cannot read, it is only `Approved: yes|no (record <id>)`, because GitHub keeps every earlier version of a PR description.
 
-Before the body is composed, `gstack-prose-lint` reads the Why, Summary and Blast radius drafts (`--sections 'Why,Summary,Blast radius' --gate`) and the CHANGELOG entry (`--base origin/<base> --gate`), and a `PROSE_LINT_FOUND` line names the sentence to rewrite; the rest of the body is advisory. The Captain's merge-ask template (`captain/templates/merge-ask.md`) carries the same four sections, so a READY report and its PR say the same thing.
+Before the body is composed, `gstack-prose-lint` reads the Why, Summary and Blast radius drafts (`--sections 'Why,Summary,Blast radius' --gate`) and the CHANGELOG entry (`--base origin/<base> --gate`), and a `PROSE_LINT_FOUND` line names the sentence to rewrite; the rest of the body is advisory. The Captain's merge-ask template (`captain/templates/merge-ask.md`) carries the same sections, so a READY report and its PR say the same thing.
 
 ### Versions: where `/ship` looks, and when it ships without one
 
@@ -1487,7 +1489,7 @@ id in the READY), the skill ships both as options for the crew rules file.
 
 Templates (CREW.md, AGENTS.md, NOTES.md, DIGEST.md, the flaky ledger, the lane report,
 the READY block, the slot call, the lane brief, the plan and merge asks, the daily automation prompt)
-live in `captain/templates/`; the team setup guide for Capy is [docs/captain.md](captain.md).
+live in `captain/templates/`; the team setup guide for Capy is [crew/docs/captain.md](../crew/docs/captain.md).
 
 ## `/gstack-upgrade`
 

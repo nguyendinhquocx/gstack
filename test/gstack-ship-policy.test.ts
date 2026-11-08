@@ -10,7 +10,7 @@ import { spawnSync } from 'node:child_process';
 import { EXIT } from '../lib/headless-artifacts';
 import { BUMP_NEVER_KEY_VERSION, CHANGELOG_FRAGMENTS_KEY_VERSION, DEFAULT_POLICY, POLICY_KEYS, POLICY_KEY_INTRODUCED, REVIEW_SCOPE_KEY_VERSION, STAMP_PLACEHOLDERS_KEY_VERSION, globToRegExp, matchesAny, minimumReader, shipConsequences, validatePolicy } from '../lib/ship-policy';
 import { PLAN_RECORD_KEY_VERSION } from '../lib/ship-policy-keys';
-import { fillDue } from '../lib/ship-queue-train';
+import { fillDue } from '../crew/lib/ship-queue-train';
 import { cmpVersion, parseVersion } from '../lib/version-source';
 import { BASE_POLICY, cleanup, makeFixtureRepo, runBin, type FixtureRepo } from './helpers/restamp-fixture';
 
@@ -183,7 +183,7 @@ describe("gstack's own .gstack/ship-policy.json", () => {
     for (const f of fs.readdirSync(path.join(root, '.github/workflows')).filter(f => f.endsWith('.yml'))) {
       const text = fs.readFileSync(path.join(root, '.github/workflows', f), 'utf8');
       const on = text.slice(text.search(/^on:/m), text.search(/^jobs:/m));
-      if (!/^\s+pull_request:/m.test(on) || /^\s+paths(-ignore)?:/m.test(on)) continue;
+      if (!/^\s+pull_request(?:_target)?:/m.test(on) || /^\s+paths(-ignore)?:/m.test(on)) continue;
       const body = text.slice(text.search(/^jobs:/m));
       for (const m of body.matchAll(/^  ([A-Za-z0-9_-]+):\n((?:    .*\n|\s*\n)*)/gm)) {
         const name = /^    name:\s*(.+)$/m.exec(m[2]!)?.[1]?.trim();

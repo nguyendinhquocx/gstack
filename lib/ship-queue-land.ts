@@ -18,15 +18,15 @@ import { mergeChangelogs, parseChangelog } from './changelog-check';
 import { MIN_POLL_MS, pollDelayMs } from './gh-poll';
 import { fragmentSlug, readFragments } from './changelog-fragments';
 import { restamp, versionAtRef } from './restamp';
-import { acquireLandLock, lockLabel, readLock, writeLock, type LandLockPhase } from './ship-queue-land-lock';
+import { acquireLandLock, lockLabel, readLock, writeLock, type LandLockPhase } from '../crew/lib/ship-queue-land-lock';
 import { matchesAny, type ShipPolicy } from './ship-policy';
 import { ciAtHead, loadBasePolicy, type QueueContext, type StepOutput } from './ship-queue';
-import { QUEUE_DIR_REL, git, writeJsonAtomic, type QueueFailure } from './ship-queue-gate';
+import { QUEUE_DIR_REL, git, writeJsonAtomic, type QueueFailure } from '../crew/lib/ship-queue-gate';
 import { landPlan } from './plan-record';
 import { bindShippedReceipt } from './ship-receipt-depth';
-import { TERMINAL_STATES, freezeLockCleared, loadReady, loadTrain, rebuildFromNotes, repoIdentity } from './ship-queue-train-record';
+import { TERMINAL_STATES, freezeLockCleared, loadReady, loadTrain, rebuildFromNotes, repoIdentity } from '../crew/lib/ship-queue-train-record';
 
-export { LAND_LOCK_REF } from './ship-queue-land-lock';
+export { LAND_LOCK_REF } from '../crew/lib/ship-queue-land-lock';
 export const MAX_RESTAMPS = 2;
 const MANIFESTS = ['package.json', 'package-lock.json', 'npm-shrinkwrap.json'];
 const isSha = (s: string | undefined) => /^[0-9a-f]{40,64}$/.test(s ?? '');
@@ -303,7 +303,7 @@ function repair(ctx: QueueContext, policy: ShipPolicy, j: LandJournal | null, fi
       pushed = remote[0]!;
       lines.push(`branch: ${branch} already on origin at ${pushed.slice(0, 12)} (an earlier --repair pushed it); opening or finding its PR`);
     }
-    const pr = ctx.gh(['pr', 'create', '--base', ctx.base, '--head', branch, '--title', `Release entry for the merge outside land beside #${j.pr}`, '--body', `QUEUE_LAND_DRIFT repair (docs/troubleshooting.md#queue-land-drift). Outside commits: ${outside.join(', ') || 'unknown'}.`]);
+    const pr = ctx.gh(['pr', 'create', '--base', ctx.base, '--head', branch, '--title', `Add a changelog entry for changes merged by hand next to #${j.pr}`, '--body', `QUEUE_LAND_DRIFT repair (docs/troubleshooting.md#queue-land-drift). Outside commits: ${outside.join(', ') || 'unknown'}.`]);
     const n = /\/pull\/(\d+)/.exec(`${pr.out}\n${pr.err ?? ''}`)?.[1];
     if (!n) return fail(lines, { code: 'QUEUE_NOT_READY', message: `gh pr create failed: ${(pr.err ?? pr.out).trim().slice(0, 160)}` }, run);
     j.repair_pr = n; writeJsonAtomic(file, j);

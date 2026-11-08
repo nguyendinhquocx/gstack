@@ -305,9 +305,9 @@ costs one cheap pass. Each scan gets one 120-second deadline, set in millisecond
 256 MB, is also `consumer_scan_failed`, and its detail says what stopped it and names
 the deadline. One scan fits a minute inside the 180 seconds /ship gives
 `gstack-review-plan`; a plan that also scans a fix range runs two scans, and if they
-pass that limit `gstack-review-dispatch pass` stops with
+pass that limit the plan, run by itself or under `gstack-review-dispatch pass`, stops with
 [`REVIEW_PLAN_STOPPED`](troubleshooting.md#review-plan-stopped) before any reader
-runs (`GSTACK_REVIEW_PLAN_TIMEOUT_MS` sets the pass's limit in milliseconds). Only `classifyDiff` applies the rule (`lib/review-collect.ts`
+runs (`GSTACK_REVIEW_PLAN_TIMEOUT_MS` sets the limit in milliseconds). Only `classifyDiff` applies the rule (`lib/review-collect.ts`
 finds the consumers, `gstack-ship-preflight`'s `RUNTIME_LINES` reads the same
 function); every path-only caller (the receipt's gate-scan decision, the Step 16
 post-review route, /autoplan's docs-only scope) keeps data files code. A numeric claim
@@ -401,7 +401,7 @@ and lockfiles stay runtime. To adopt it, commit an entry like this on the base b
 **Gate paths for the machinery itself.** An edit to `lib/review-depth.ts`,
 `lib/review-collect.ts`, `bin/gstack-review-plan`, `lib/review-scope.ts`,
 `lib/review-targeted.ts`, `lib/review-risk.ts`, `lib/review-exclude.ts` (which files reviewers never see),
-`lib/default-base.ts` (the base every diff is cut from), `review/specialists/targeted.md`, `lib/ship-queue*.ts`, `lib/regen.ts`, `.gstack/generated.json`,
+`lib/default-base.ts` (the base every diff is cut from), `review/specialists/targeted.md`, `lib/ship-queue*.ts` and `crew/lib/ship-queue*.ts`, `lib/regen.ts`, `.gstack/generated.json`,
 `ship/sections/review-army.md.tmpl`, `ship/sections/adversarial.md.tmpl` or
 `scripts/resolvers/review-army.ts` is gate class: changing how much review runs gets
 the most review. `rules=` (`DEPTH_RULES`) hashes the deciding constants and patterns,
@@ -1037,7 +1037,7 @@ ones, and the arm lost blockers. `bin/gstack-review-dispatch` closes both ends:
 - `lib/review-collect.ts`: `collectCommit` (git objects only, from any checkout) and `collectLive` (the working tree), per-path lines and the base commit's registry (`test/review-collect.test.ts`).
 - `lib/review-scope.ts`, `bin/gstack-review-scope`: `classify`, `defer`, `render`, `summary` (with `fix_checks`, `dispatches`, `est_input_tokens`, `unrecorded`, `ledgers_read`); refusals are `REVIEW_SCOPE_INPUT`, `REVIEW_SCOPE_RANGE` and `REVIEW_SCOPE_LEDGER` ([troubleshooting.md](troubleshooting.md#review-scope-input)).
 - `lib/ship-policy.ts`: the `review_scope` key and its `ship: review_scope …` consequence line.
-- `review/checklist.md`: `prereg-with-results` under Gate Integrity and `test-keyboard-count-loop` under Pass 2; `bin/gstack-coauthor-trailers` for the contributor-credit trailers of a port.
+- `review/checklist.md`: `prereg-with-results` under Gate Integrity and `test-keyboard-count-loop` under Pass 2; `crew/bin/gstack-coauthor-trailers` for the contributor-credit trailers of a port.
 - `lib/ship-receipt-prose.ts`, `gstack-ship-receipt read --check-prose`: the body's quoted counters against the receipt (`RECEIPT_PROSE_MISMATCH`, [ship-policy.md](ship-policy.md#ship-receipt)).
 - `lib/ship-receipt.ts`, `lib/headless-artifacts.ts`: the `review_loop` receipt object, its schema and the summary line.
 - `lib/no-stop.ts`, `bin/gstack-no-stop`, `lib/autoplan-carry.ts`: the [no-stop defaults](#no-stop), their ledger and the autoplan re-gate (`test/no-stop.test.ts`, `test/autoplan-carry.test.ts`).

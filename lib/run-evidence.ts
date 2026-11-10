@@ -77,7 +77,8 @@ export type RunRefusal = 'run_ref_invalid' | 'other_repository' | 'fork_run' | '
   | 'run_not_success' | 'job_missing' | 'job_ambiguous' | 'job_skipped' | 'job_not_success' | 'artifact_missing' | 'artifact_mismatch'
   | 'artifact_reused' | 'sizing_experiment' | 'tree_mismatch' | 'newer_run_vetoes' | 'run_changed' | 'run_stale' | 'os_mismatch' | 'api_error';
 /** `skipped`: the files whose every test skipped on the runner (tree.json `skipped_files`, GST-1190); undefined when an older tree.json does not say. */
-export interface RunEvidence { run_id: number; run_attempt: number; head_sha: string; tree: string; profile: string; event: string; finished_at: string; files: string[]; tests: number | null; skipped?: string[]; skipped_jobs?: string[] }
+/** `docs_only`: a pull_request run whose gate skipped every skippable job on a change lib/docs-only.ts calls human docs only; it ran and recorded no tests (R81). */
+export interface RunEvidence { run_id: number; run_attempt: number; head_sha: string; tree: string; profile: string; event: string; finished_at: string; files: string[]; tests: number | null; skipped?: string[]; skipped_jobs?: string[]; docs_only?: true }
 /** `fix`: the one command that clears a refusal the caller can repair, such as a pull_request run that tested a merge with an older base. */
 export type RunVerdict = { ok: true; evidence: RunEvidence } | { ok: false; reason: RunRefusal; detail: string; fix?: string };
 
@@ -156,7 +157,7 @@ export const normalPath = (f: string): string => f.replace(/^(\.\/)+/, '');
  * The verdict for run `runRef` under `profile`. `vetoHeads` are further heads
  * whose newer runs of the same workflow can veto (the consumer's own head).
  */
-export function verifyRun(deps: RunDeps, o: { repo: string; runRef: string; profileName: string; profile: RunProfile; vetoHeads?: string[]; ignoreRun?: number; now: Date; unchanged?: (p: RunProfile) => string | null }): RunVerdict {
+export function verifyRun(deps: RunDeps, o: { repo: string; runRef: string; profileName: string; profile: RunProfile; vetoHeads?: string[]; ignoreRun?: number; now: Date; unchanged?: (p: RunProfile) => string | null; docsOnly?: (head: string) => boolean }): RunVerdict {
   const id = parseRunRef(o.runRef, o.repo);
   if (id === null) return fail('run_ref_invalid', `${JSON.stringify(o.runRef)} is not a run id or a run URL on ${o.repo}`);
   const p = o.profile;
@@ -199,6 +200,13 @@ export function verifyRun(deps: RunDeps, o: { repo: string; runRef: string; prof
     for (const head of heads) {
       const newer = deps.runsForHead(p.workflow, head).filter(r => !(r.id === id && r.run_attempt === run.run_attempt) && r.id !== o.ignoreRun && started(r) >= (run.created_at ?? '') && !(r.status === 'completed' && r.conclusion === 'success'));
       if (newer.length) return fail('newer_run_vetoes', `newer run ${newer[0]!.id} of ${p.workflow} on ${head.slice(0, 12)} is ${newer[0]!.status === 'completed' ? newer[0]!.conclusion : newer[0]!.status}`);
+    }
+    if (p.skippable && p.skippable.jobs.every(j => skippedJobs.includes(j)) && o.docsOnly?.(run.head_sha)) {
+      const tree = deps.commitTree(run.head_sha);
+      if (!tree) return fail('api_error', `git cannot read the tree of ${run.head_sha}`);
+      const changed = runChanged(deps, id, run.run_attempt);
+      if (changed) return fail('run_changed', changed);
+      return { ok: true, evidence: { run_id: id, run_attempt: run.run_attempt, head_sha: run.head_sha, tree, profile: o.profileName, event: run.event, finished_at: finishedAt!, files: [], tests: null, skipped_jobs: skippedJobs, docs_only: true } };
     }
     let rec: TreeRecord;
     try { rec = deps.artifact(id, p.artifact); }
@@ -268,7 +276,7 @@ export function uncoveredFiles(inventory: string[], evidence: RunEvidence[], ski
 
 /** What a run check reads: the repository, the verifier's dependencies, the base branch's profiles and the clock. */
 /** `unchanged` (findCarry only): null when a profile's workflow and gate inputs match the base, else which file differs. */
-export interface RunSource { repo: string; deps: RunDeps; profiles: Record<string, RunProfile>; now: Date; unchanged?: (p: RunProfile) => string | null }
+export interface RunSource { repo: string; deps: RunDeps; profiles: Record<string, RunProfile>; now: Date; unchanged?: (p: RunProfile) => string | null; docsOnly?: (head: string) => boolean }
 export type FromRunVerdict = { ok: true; evidence: RunEvidence; receipt: string } | { ok: false; reason: string; detail: string };
 
 /**
@@ -324,7 +332,11 @@ export function ghRunDeps(repo: string, repoRoot: string): RunDeps {
   return {
     run: id => json<ApiRun>(`repos/${repo}/actions/runs/${id}`),
     runsForHead: (workflow, sha) => all<ApiRun>(`repos/${repo}/actions/workflows/${workflow}/runs?head_sha=${sha}&per_page=100`, 'workflow_runs'),
-    jobs: (id, attempt) => all<ApiJob>(`repos/${repo}/actions/runs/${id}/attempts/${attempt}/jobs?per_page=100`, 'jobs'),
+    // A long rerun attempt's 100-job page can outlast a proxy's ~10 s cutoff (GST-2215): read 50 per page, and after a 5xx read the whole list once more at 25. A failed page throws, so a partial list never counts.
+    jobs: (id, attempt) => {
+      const read = (n: number) => all<ApiJob>(`repos/${repo}/actions/runs/${id}/attempts/${attempt}/jobs?per_page=${n}`, 'jobs');
+      try { return read(50); } catch (e) { if (!/\bHTTP 5\d\d\b/.test((e as Error).message)) throw e; return read(25); }
+    },
     artifact: (id, name) => {
       const listed = all<{ name: string; size_in_bytes: number; expired: boolean }>(`repos/${repo}/actions/runs/${id}/artifacts?name=${encodeURIComponent(name)}&per_page=100`, 'artifacts').filter(a => a.name === name && !a.expired);
       if (listed.length !== 1) throw new Error(`run ${id} has ${listed.length} unexpired artifacts named ${name}`);

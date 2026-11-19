@@ -239,8 +239,9 @@ moves `stable` more than once in 72 hours otherwise, except for a verified
 security or regression fix (`--security` or `--regression`, with `--ref`): it takes the newest green commit on main's first-parent history
 (its required check succeeded, the backstop check succeeded, every check run
 completed and none failed, no active freeze), tags it `v<VERSION>`, publishes a
-GitHub Release whose notes are one line per CHANGELOG version since the
-previous release, and fast-forwards `stable`. New installs and team-mode installs
+GitHub Release whose notes list every change in the CHANGELOG versions since
+the previous release, one line each with the pull request that made it
+([release notes](../../docs/releases.md#release-notes)), and fast-forwards `stable`. New installs and team-mode installs
 follow `stable`; `gstack-config set update_channel main` follows every merge. A
 hotfix is `--ref <sha on main>`, held by the same floor. Details, the floor's
 refusal codes and the "nothing green in the window" failure mode:
@@ -353,7 +354,7 @@ on a few points. Ship the one that fits the repository; both are supported.
 | Small fixes | one PR each, batched by the train | batched into wave PRs, since serial slots cost about 30 minutes each |
 | After the merge | the main backstop gates any push a train did not cover, and freezes the queue on red | the controller watches main's test, e2e and release runs until the release publishes; a red main freezes the queue until root-caused |
 | Severe triage | the Captain watches issues and PRs and starts a thread per unowned severe item | a scheduled severe sweep (every 4 to 8 hours) with a fixed severity bar, dedupe against owned lanes, one hotfix thread per batch |
-| Contributor PRs | read as bug reports and rewritten from main on a crew branch, so no contributor commit enters the tree; `Co-authored-by` only on lines carried over unchanged; the fork PR is closed with a thank-you that links the fix, posted as `capy-ai[bot]` through `tools.pr.comment`, never `gh` | the rewritten fixes land through a wave PR with "Contributed by @handle" and `Supersedes` lines, `Co-authored-by` only on lines carried over unchanged |
+| Contributor PRs | read as bug reports and rewritten from main on a crew branch, so no contributor commit enters the tree, except a docs-only PR for people, merged as it is after a text read of every link, command and install step; `Co-authored-by` only on lines carried over unchanged; the fork PR is closed with a thank-you that links the fix, posted as `capy-ai[bot]` through `tools.pr.comment`, never `gh` | the rewritten fixes land through a wave PR with "Contributed by @handle" and `Supersedes` lines, `Co-authored-by` only on lines carried over unchanged |
 | Privacy | the pregate's sealed-output and secret scans before every push | plus a per-user denylist grep (names, hostnames, identifying counts from private sources) before any public artifact |
 
 ## Known Capy limits

@@ -8,8 +8,10 @@
  * moved past the pin's merge base, the checks at the pin never saw the tree that would land (GST-1316), so land builds
  * the pin merged onto the base tip and runs the base policy's land.merged_checks there (lib/land-merged-checks.ts;
  * repo commands, so only under --allow-repo-commands and never under --dry-run), refusing on a conflict or a failure;
- * with no list it prints a STALE_BASE: warn line and lands. Then gh pr merge --squash --match-head-commit <pin> with the
- * PR title as the commit subject (`--subject "<title> (#<n>)"`, so the checked title is main's history title), a check
+ * with no list it prints a STALE_BASE: warn line and lands. Then gh pr merge --match-head-commit <pin> with the message
+ * lib/squash-message.ts builds (subject `<title> (#<n>)`, so the checked title is main's history title, and a body of
+ * the PR body's opening lines plus the branch's trailers; `--squash`, or `--merge` under history: merge-only or a
+ * land.merge_commit_paths match), a check
  * that the merge commit's tree is the pin merged onto that commit's parent (its merged checks rerun when that parent is
  * neither the base land checked nor in the pin), a land note on refs/notes/gstack-trains, and the lock's release. A
  * rerun after GitHub merged goes straight to the tree check.
@@ -27,9 +29,46 @@ import { acquireLandLock, lockLabel, ownsLock, readLock, type HeldLandLock, type
 import * as os from 'node:os';
 import { activeFreeze, loadReady, persist, rebuildFromNotes, repoIdentity, type FreezeRecord } from '../crew/lib/ship-queue-train-record';
 import { bindShippedReceipt } from './ship-receipt-depth';
+import { gateAcceptance } from './gate-dispositions';
+import { landMessage, mergeArgs, messageLines, sectionText } from './squash-message';
 
 interface DirectPr { state: string; baseRefName?: string; headRefName: string; headRefOid: string; isCrossRepository: boolean; body: string; title?: string; mergeable?: string; mergeStateStatus?: string; mergeCommit?: { oid: string } | null }
-export interface DirectOptions { pr: string; pin: string; dryRun?: boolean; allowRepoCommands?: boolean; breakLock?: boolean; repair?: boolean; now?: () => Date }
+export interface DirectOptions { pr: string; pin: string; body?: string; dryRun?: boolean; allowRepoCommands?: boolean; breakLock?: boolean; repair?: boolean; now?: () => Date; acceptGateDispositions?: readonly string[] }
+
+/**
+ * The pin's /ship receipt bound to it, and every owner gate disposition the approval store applies at the pin accepted by the
+ * lander (lib/gate-dispositions.ts gateAcceptance, re-derived from the store, never from the receipt or the body): the one
+ * check land --pin and verify --pin share, so the two cannot drift (docs/ship-policy.md#gate-dispositions).
+ */
+export function pinAcceptance(ctx: QueueContext, info: Pick<DirectPr, 'body' | 'headRefName'>, pr: string, pin: string, accepted: readonly string[]): { lines: string[]; failure?: QueueFailure } {
+  const receipt = bindShippedReceipt(ctx.repoRoot, `origin/${ctx.base}`, info.body ?? '', pr, [pin]);
+  const lines = [receipt.line, ...(receipt.depthLine ? [receipt.depthLine] : []), ...(receipt.targetedLine ? [receipt.targetedLine] : [])];
+  if (!receipt.ok) return { lines, failure: { code: receipt.code, message: receipt.message, fix: `run /ship at the pin, then gstack-ship-queue ready --pr ${pr}` } };
+  const gates = gateAcceptance({ cwd: ctx.repoRoot, branch: info.headRefName, pin, body: info.body ?? '', receipt: receipt.receipt, accepted });
+  return { lines: [...lines, ...gates.lines], ...(gates.failure ? { failure: gates.failure } : {}) };
+}
+
+/**
+ * `gstack-ship-queue verify --pr <n> --pin <sha> [--accept-gate-disposition <id>]...`: land's pre-merge acceptance for a lander
+ * that merges some other way (a pinned REST merge). Read-only: it fetches, binds the receipt and checks the gate dispositions
+ * with pinAcceptance, prints each GATE_DISPOSITION line, and exits 0 only when every one is accepted. It merges nothing.
+ */
+export function verifyPin(ctx: QueueContext, o: { pr: string; pin: string; acceptGateDispositions: readonly string[] }): StepOutput {
+  const root = ctx.repoRoot, run = 'none';
+  const fail = (lines: string[], failure: QueueFailure): StepOutput => ({ ok: false, lines, failure, run });
+  if (!git(root, ['fetch', '-q', 'origin', ctx.base]).ok) return fail([], { code: 'QUEUE_NOT_READY', message: `cannot fetch origin/${ctx.base}`, fix: 'fix the fetch, then rerun verify' });
+  const info = view(ctx, o.pr);
+  if ('code' in info) return fail([], info);
+  const lines = [`VERIFY_PIN: #${o.pr} pin=${o.pin} (read-only; merges nothing)`];
+  if (info.isCrossRepository) return fail(lines, { code: 'QUEUE_TRAIN_UNTRUSTED', message: `#${o.pr} is a fork head` });
+  if (info.state !== 'OPEN') return fail(lines, { code: 'QUEUE_NOT_READY', message: `#${o.pr} is ${info.state}` });
+  if (info.headRefOid !== o.pin) return fail(lines, { code: 'QUEUE_LAND_PIN_MOVED', message: `#${o.pr}'s head is ${info.headRefOid.slice(0, 12)}, not the pin ${o.pin.slice(0, 12)}` });
+  if (!havePin(root, o.pr, o.pin, info.headRefName)) return fail(lines, { code: 'QUEUE_NOT_READY', message: `cannot fetch the pin ${o.pin.slice(0, 12)} from ${info.headRefName} or refs/pull/${o.pr}/head`, fix: 'fix the fetch, then rerun verify' });
+  const accepted = pinAcceptance(ctx, info, o.pr, o.pin, o.acceptGateDispositions);
+  lines.push(...accepted.lines);
+  if (accepted.failure) return fail(lines, accepted.failure);
+  return { ok: true, run, lines: [...lines, `VERIFY_PIN: ok #${o.pr} at ${o.pin.slice(0, 12)}: the receipt is bound to the pin and every gate disposition the store applies there is accepted`] };
+}
 
 const isSha = (s: string | undefined) => /^[0-9a-f]{40,64}$/.test(s ?? '');
 
@@ -161,9 +200,9 @@ export function landDirect(ctx: QueueContext, o: DirectOptions): StepOutput {
   rebuildFromNotes(root, ctx.remote ?? 'origin');
   if (release) lines.push(`RELEASE: v${release.version} folds ${release.fragments.length} fragment(s) and changes nothing but the stamp, so it needs no /ship receipt or READY note`);
   else {
-    const receipt = bindShippedReceipt(root, `origin/${ctx.base}`, info.body ?? '', o.pr, [o.pin]);
-    lines.push(receipt.line, ...(receipt.depthLine ? [receipt.depthLine] : []), ...(receipt.targetedLine ? [receipt.targetedLine] : []));
-    if (!receipt.ok) return fail(lines, { code: receipt.code, message: receipt.message, fix: `run /ship at the pin, then gstack-ship-queue ready --pr ${o.pr}` });
+    const accepted = pinAcceptance(ctx, info, o.pr, o.pin, o.acceptGateDispositions ?? []);
+    lines.push(...accepted.lines);
+    if (accepted.failure) return fail(lines, accepted.failure);
     const readyNote = loadReady(keys, o.pr, o.pin);
     if (!readyNote) return fail(lines, { code: 'QUEUE_NOT_READY', message: `no READY note for #${o.pr} at the pin ${o.pin.slice(0, 12)}`, fix: `the lane runs gstack-ship-queue ready --pr ${o.pr} --no-screen at the pin` });
     const plan = landPlan({ env: process.env, policyValue: policy.plan_record, record: readyNote.plan, body: info.body ?? '' });
@@ -202,7 +241,6 @@ export function landDirect(ctx: QueueContext, o: DirectOptions): StepOutput {
     if ('failure' in got) return fail(lines, got.failure);
     held = got.held;
   }
-  const subject = info.title?.trim() ? ['--subject', `${info.title.trim()} (#${o.pr})`] : [];
   const locked = (): StepOutput => {
     if (held && !git(root, ['fetch', '-q', 'origin', ctx.base]).ok) return fail(lines, { code: 'QUEUE_NOT_READY', message: `cannot re-fetch origin/${ctx.base} under the land lock`, fix: 'fix the fetch, then rerun land' });
     const tip = git(root, ['rev-parse', `origin/${ctx.base}`]).out;
@@ -224,7 +262,10 @@ export function landDirect(ctx: QueueContext, o: DirectOptions): StepOutput {
         lines.push(`MERGED_CHECKS: pass tree=${mc.tree} base=${tip} pin=${o.pin.slice(0, 12)} checks: ${checks.join('; ')}`);
       }
     }
-    if (o.dryRun) return { ok: true, run, lines: [...lines, `DRY-RUN: nothing merged (would run gh pr merge ${o.pr} ${policy.history === 'merge-only' ? '--merge' : '--squash'} --match-head-commit ${o.pin}${subject.length ? ` --subject ${JSON.stringify(subject[1])}` : ''})`] };
+    const msg = landMessage(root, { pr: o.pr, title: info.title ?? '', prBody: info.body ?? '', mergeBase, pin: o.pin, tip, policy, override: o.body ?? (release ? sectionText(info.body ?? '', 'Release notes') || undefined : undefined) });
+    if ('error' in msg) return fail(lines, { code: 'QUEUE_NOT_READY', message: msg.error, fix: 'rewrite the PR title or the opening lines of its body, or pass land --body-file <file> with the plain lines to use; then rerun land' });
+    lines.push(...messageLines(msg));
+    if (o.dryRun) return { ok: true, run, lines: [...lines, `DRY-RUN: nothing merged (would run gh pr merge ${o.pr} --${msg.method} --match-head-commit ${o.pin} with the SUBJECT and BODY above)`] };
     if (o.repair) {
       if (!rebuildFromNotes(root, remote).fetched) return fail(lines, { code: 'QUEUE_NOT_READY', message: `cannot fetch refs/notes/gstack-trains under the land lock, so the freeze's repair slot cannot be read; nothing merged`, fix: 'fix the fetch, then rerun land' });
       const frozen = activeFreeze(keys);
@@ -239,10 +280,9 @@ export function landDirect(ctx: QueueContext, o: DirectOptions): StepOutput {
       lines.push(`REPAIR: #${o.pr}@${o.pin.slice(0, 12)} admitted under the land lock; the freeze stays active until the main backstop is green on a main that contains this merge`);
     }
 
-    const method = policy.history === 'merge-only' ? '--merge' : '--squash';
     const lost = held!.set('merging');
     if (lost) return fail(lines, lost);
-    const m = ctx.gh(['pr', 'merge', o.pr, method, '--match-head-commit', o.pin, ...subject]);
+    const m = ctx.gh(mergeArgs(o.pr, o.pin, msg));
     let merge: string | undefined;
     for (let i = 0; i < (m.ok ? 3 : 1) && !isSha(merge); i++) {
       if (i) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, pollDelayMs(MIN_POLL_MS));

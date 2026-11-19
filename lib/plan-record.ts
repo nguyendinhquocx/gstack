@@ -19,7 +19,7 @@
  * store (gateState), so a revised gate must be imported again before it counts. Callers: gstack-ship-queue ready (writes the record into the READY note), land (checks
  * it), gstack-ship-release finish --plan (/ship) and gstack-approvals render --plan / plan-check.
  */
-import { spawnSync } from 'node:child_process';
+import { spawnSync } from './spawn-sync';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -42,7 +42,7 @@ export interface PlanRecord { line: string; state: 'approved' | 'exempt'; ref?: 
 export interface PlanFailure { code: ResultCodeName; message: string; fix: string }
 export type PlanResolution = { ok: true; record: PlanRecord; summary: string } | { ok: false; failure: PlanFailure };
 
-const NOT_PLAN_ROW = /\b(ruled_note|review_loop_grant|review_loop_exception|test_lane_exception)\b/;
+const NOT_PLAN_ROW = /\b(ruled_note|gate_disposition|review_loop_grant|review_loop_exception|review_round_grant|test_lane_exception)\b/;
 const ROW_ID = /^a-[0-9a-f]{12}$/;
 const RECORD_ID = /^r-[0-9a-f]{12}$/;
 const LOCAL_SOURCE = 'state-root config';

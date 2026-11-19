@@ -147,7 +147,7 @@ a skill's own bash.
 
 **Size budgets:** generated SKILL.md files warn above 160KB (~40K tokens);
 `test/catalog-budget.test.ts` caps the always-loaded skill catalog at
-`CATALOG_BUDGET_TOKEN_EQUIVALENTS` (1,452 today; each new skill ratchets it); and
+`CATALOG_BUDGET_TOKEN_EQUIVALENTS` (2,290 today; each new skill ratchets it); and
 `test/context-budget-ratchet.test.ts` pins per-skill token ceilings against
 `test/fixtures/context-budget.json` (for legitimate growth or a landed
 reduction, re-run `bun test/helpers/capture-context-budget.ts` and commit the
@@ -546,7 +546,7 @@ When the user's request matches an available skill, invoke it via the Skill tool
 Key routing rules:
 - Product ideas/brainstorming → invoke /office-hours
 - Strategy/scope → invoke /plan-ceo-review
-- Architecture → invoke /autoplan
+- Architecture → invoke /plan-eng-review
 - Design system/plan review → invoke /design-consultation or /plan-design-review
 - Full review pipeline → invoke /autoplan
 - Bugs/errors → fix them directly: one read-only check of the cause, or a focused failing test first when the cause is unclear; then fix it and run that test

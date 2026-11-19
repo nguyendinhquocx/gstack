@@ -2,7 +2,7 @@
 name: autoplan
 preamble-tier: 3
 version: 1.0.0
-description: "Auto-review pipeline — runs the CEO, design, eng (architecture, edge cases, failure modes, tests) and DX reviews (lean run: one reviewer), auto-deciding. (gstack)"
+description: "Auto-review pipeline — runs the CEO, design, eng and DX reviews in order (lean run: one reviewer), auto-deciding. Use for: run all reviews, automatic review pipeline. (gstack)"
 triggers:
   - run all reviews
   - automatic review pipeline
@@ -34,7 +34,7 @@ hooks:
 
 ## Shared preamble (load first)
 
-This skill follows gstack shared preamble `4e82fa4c839f` (AskUserQuestion format, voice, writing, completeness and completion rules). If your Read of that file, headed by this id, is still in context, do not read it again; otherwise Read `~/.claude/skills/gstack/autoplan/sections/preamble.md` in full before the command below. A section or subsection here with a shared heading replaces the shared one.
+This skill follows gstack shared preamble `d8804c5ab6bf` (AskUserQuestion format, voice, writing, completeness and completion rules). If your Read of that file, headed by this id, is still in context, do not read it again; otherwise Read `~/.claude/skills/gstack/autoplan/sections/preamble.md` in full before the command below. A section or subsection here with a shared heading replaces the shared one.
 
 ## Preamble (run first)
 
@@ -302,10 +302,10 @@ outside reviewer: yes; run evals: yes; reduce scope on a complete plan: no).
 3. **Codex disagreements** — the outside reviewer recommends differently and has a valid point.
 
 **User Challenge** — Claude and Codex both recommend changing the
-user's stated direction: merge, split, add or remove features/skills/workflows.
-NEVER auto-decide these. At the final approval gate give the original direction,
-proposed change, reasoning, blind spots and cost of being wrong (Phase 4 gate item);
-flag agreed security/feasibility risks. The user's direction stands until they approve the change.
+user's stated direction (merge, split, add or remove features/skills/workflows), or a
+premise is clearly wrong. Never auto-decide User Challenges: each is a Phase 4 `uc<n>`
+approval, never mid-run (the user has context models lack); flag agreed security/feasibility
+risks. The user's direction stands until they approve the change.
 
 ---
 
@@ -364,10 +364,6 @@ full interactive depth; answer each question using the 6 principles.
 **Default resolution: the recommended option.** Take `(recommended)` or the mode's
 context default. Use the 6 principles for missing recommendations/ties. On principle
 disagreement, take the recommendation and surface it as Taste at the final gate.
-
-**Never auto-decide User Challenges:** both models agree to change the user's
-direction/settled decisions, or a premise is clearly wrong. Ask once at the Final
-Approval Gate, never mid-run; the user has context models lack.
 
 Read referenced code/diffs/files; decide every issue. Produce all required
 diagrams, tables, registries and artifacts on disk or in the plan. LOG decisions,
@@ -669,8 +665,8 @@ unparsed or stale replies are re-presented (`gate_rev`+1), never guessed. `rec` 
 the plan as first written. First match: any `pending` id = approve nothing (bare `p1a` leaves
 `uc<n>` pending; re-parse the owner's whole reply);
 `p1c`/`p1d`/`p1e` = C/D/E; a chosen `changes_plan` option (or an unflagged override)
-= B on a `d<n>`, B2 on a `uc<n>`; else = A. Under `SESSION_KIND: unattended` Read `sections/unattended.md`, end here
-with its `GSTACK_RESULT` line and never approve.
+= B on a `d<n>`, B2 on a `uc<n>`; else = A. Under `SESSION_KIND: unattended`
+Read `sections/unattended.md` and settle the gate by its gate rule instead.
 
 **Option handling:**
 - A: mark APPROVED, run `~/.claude/skills/gstack/bin/gstack-owner-brief close --out "$_AP" --plan <ACTIVE_PLAN>`, write review logs, suggest /ship
@@ -730,5 +726,3 @@ Present a phase coverage table (CEO, design, DX, eng): host, outside provider/st
 native completion, findings, partial coverage, with actual counts.
 
 **Implementation model:** relay model/source from `"$HOME/.claude/skills/gstack/bin/gstack-models" resolve --role implementation --provider anthropic`. gstack cannot change this session. Recommend only; no spawn or config edits unless asked. On error, relay its repair, not a model. [Policy setup](https://github.com/garrytan/gstack/blob/main/docs/model-policy.md).
-
-Suggest `/ship` when ready to create the PR.

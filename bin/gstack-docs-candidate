@@ -54,13 +54,14 @@
  * <audit-id>-result.json and the section, unchanged, as <audit-id>-documentation.md
  * in --out-dir and prints DOCS_RESULT: ok. Otherwise it writes nothing, prints a
  * DOCS_RESULT_INVALID line naming each bad key and a RETRY_NOTE: for the re-audit's
- * prompt, and exits 1 (GST-1843). When the line's only fault is its shape it prints
- * FORMAT_REPAIR: instead of RETRY_NOTE:, and the step re-asks for the line once without
- * spending an attempt: repair-prompt prints that re-ask (the schema, the problems and the
- * child's own output), and result --repair-of <first output> checks the reply, refusing a
- * second repair of the same audit and any change to a value the first line gave correctly.
+ * prompt, and exits 1 (GST-1843). When the line's only fault is its shape, or text follows
+ * a JSON line carrying the audit id, it prints FORMAT_REPAIR: instead of RETRY_NOTE:, and the
+ * step re-asks for the line once without spending an attempt: repair-prompt prints that re-ask
+ * (the schema, the problems and the child's own output), and result --repair-of <first output>
+ * checks the reply, refusing a second repair of the same audit and any change to a value the
+ * first line gave correctly; after trailing text only a blocked status and its blockers carry over.
  */
-import { spawnSync } from 'child_process';
+import { spawnSync } from '../lib/spawn-sync';
 import * as fs from 'fs';
 import * as path from 'path';
 import { baseContainsHead } from '../lib/default-base';
@@ -75,6 +76,12 @@ function git(args: string[]): string {
   return r.stdout;
 }
 const nul = (text: string) => text.split('\0').filter(Boolean);
+/** A listed path holding a glob character is a real file (a Next.js [id] route, #4313) only when it exists from the repository root. */
+function repoFile(): (repoPath: string) => boolean {
+  const r = spawnSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: 60_000 });
+  const top = r.status === 0 ? r.stdout.trim() : process.cwd();
+  return repoPath => fs.existsSync(path.join(top, repoPath));
+}
 
 function state(base: string) {
   const head = git(['rev-parse', 'HEAD']).trim();
@@ -328,11 +335,12 @@ function main(argv: string[]): void {
     const outDir = path.resolve(one(rest, '--out-dir'));
     const repairOf = optional(rest, '--repair-of');
     const output = fs.readFileSync(file, 'utf8');
+    const isFile = repoFile();
     let check: DocsResultCheck;
-    if (!repairOf) check = checkDocsResult(output, auditId);
+    if (!repairOf) check = checkDocsResult(output, auditId, isFile);
     else {
       const original = fs.readFileSync(repairOf, 'utf8');
-      const prior = checkDocsResult(original, auditId);
+      const prior = checkDocsResult(original, auditId, isFile);
       let first = true;
       if (!prior.ok && prior.repairable) {
         fs.mkdirSync(outDir, { recursive: true, mode: 0o700 });
@@ -341,7 +349,7 @@ function main(argv: string[]): void {
           first = false;
         }
       }
-      check = first ? checkDocsRepair(output, original, auditId)
+      check = first ? checkDocsRepair(output, original, auditId, isFile)
         : { ok: false, problems: ['a format repair was already used for this audit', ...(prior.ok ? [] : prior.problems)], trimmed: [], repairable: false, kept: {} };
     }
     if (check.trimmed.length) console.log(`KEYS_TRIMMED: ${check.trimmed.map(k => JSON.stringify(k)).join(' ')}`);
@@ -351,7 +359,7 @@ function main(argv: string[]): void {
       else console.log(`RETRY_NOTE: ${docsRetryNote(check.problems)}`);
       process.exit(1);
     }
-    if (repairOf) console.log('FORMAT_REPAIR: applied (the reply kept every value the first line gave correctly)');
+    if (repairOf) console.log('FORMAT_REPAIR: applied (the reply kept every value the repair had to keep)');
     fs.mkdirSync(outDir, { recursive: true, mode: 0o700 });
     const resultFile = path.join(outDir, `${auditId}-result.json`);
     const sectionFile = path.join(outDir, `${auditId}-documentation.md`);
@@ -368,9 +376,9 @@ function main(argv: string[]): void {
     for (let i = 0; i < rest.length; i += 2) if (rest[i] !== '--audit-id') throw new Error(`unknown argument: ${rest[i]}`);
     const auditId = auditIdArg(rest);
     const output = fs.readFileSync(file, 'utf8');
-    const check = checkDocsResult(output, auditId);
+    const check = checkDocsResult(output, auditId, repoFile());
     if (check.ok || !check.repairable) throw new Error(`${file} is not a format-only failure of the last line, so it has no format repair: ${check.ok ? 'it is a valid result' : 'a content failure counts as an attempt (Blocked recovery, RETRY_NOTE:)'}`);
-    process.stdout.write(docsRepairPrompt(output, auditId, check.problems));
+    process.stdout.write(docsRepairPrompt(output, auditId, check.problems, check.whole, check.kept));
     return;
   }
   throw new Error(USAGE);

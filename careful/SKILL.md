@@ -1,7 +1,7 @@
 ---
 name: careful
 version: 0.1.0
-description: Safety guardrails for destructive commands. (gstack)
+description: "Safety guardrails for destructive commands. Use for: be careful, warn before destructive, safety mode. (gstack)"
 triggers:
   - be careful
   - warn before destructive
@@ -89,8 +89,8 @@ Two catastrophic shapes are **denied**, not asked: `rm -r`/`-R` of exactly
 `/`, `~`, or `$HOME`, and force-push to the repo's **default branch**. SIMPLE
 commands only (no `;`, `&&`, `||`, `|`, newline) — compound shapes fall
 through to the MEDIUM ask; `--force-with-lease` is never HIGH. A best-effort
-advisory hard-stop, not a policy boundary: the escape hatch is ending the
-opt-in, session-scoped /careful session.
+advisory hard-stop, not a policy boundary: the escape hatch is running the
+command yourself, outside the agent.
 
 ## Project patterns (additive only)
 
@@ -100,4 +100,12 @@ Add warn rules — one POSIX ERE per line, `#` comments OK — in
 after the built-in families, so config can only ADD rules, never suppress a
 baseline warning. Invalid regex lines are skipped.
 
-To deactivate, end the conversation or start a new one. Hooks are session-scoped.
+## Always on
+
+Since gstack's helper hooks went on by default, `./setup` also registers this
+check as a Claude Code hook for every session (`destructive_guard`), so it runs
+even when /careful is never loaded. Loading /careful adds nothing to that
+check; /guard still adds the edit boundary. Turn the every-session check off
+with `gstack-config set destructive_guard off` (or `./setup
+--no-destructive-guard`). With it off, /careful's own hooks last until the
+conversation ends.

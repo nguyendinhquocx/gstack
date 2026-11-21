@@ -19,7 +19,7 @@ import * as path from 'node:path';
 import { appendRows, locate, readRecord, type ApprovalRow, type Env, type RecordError, type StoreLocation } from './approval-record';
 import type { ShipReceipt } from './headless-artifacts';
 import type { ResultCodeName } from './result-codes';
-import { GSTACK_ACTOR } from './ruled-notes';
+import { isGstackActor, type RuledNote } from './ruled-notes';
 import { isSecurityFinding, REDACTED_FINDING, REDACTED_REASON, REDACTED_WORDS } from './security-findings';
 import { BIN_DIR, runScriptSync } from './script-invocation';
 
@@ -42,7 +42,7 @@ export const gateDispositionDigest = (r: Record<string, unknown>) => 'sha256:' +
 function writerShaped(r: Record<string, any>, branch: string): boolean {
   const str = (v: unknown) => typeof v === 'string' && v.trim() === v && v !== '';
   return r.schema_version === 1 && typeof r.id === 'string' && APPROVAL_ID.test(r.id) && r.source === GATE_SOURCE && r.outcome === 'approved' &&
-    r.pending === 'none' && str(r.by) && ONE_LINE.test(r.by) && !GSTACK_ACTOR.test(r.by) && str(r.words) && ONE_LINE.test(r.words) && typeof r.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.date) &&
+    r.pending === 'none' && str(r.by) && ONE_LINE.test(r.by) && !isGstackActor(r.by) && str(r.words) && ONE_LINE.test(r.words) && typeof r.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(r.date) &&
     typeof r.recorded_at === 'string' && ISO_TIME.test(r.recorded_at) && r.branch === branch && typeof r.ask === 'string' && typeof r.scope === 'string' &&
     r.id === 'a-' + createHash('sha256').update([r.source, r.date, r.ask, r.words, r.by].join('\u0000')).digest('hex').slice(0, 12) &&
     r.digest === gateDispositionDigest(r);
@@ -203,12 +203,29 @@ export function dispositionedOn(cwd: string, row: Record<string, any>, dispositi
     .filter((f: any) => !!f && typeof f.gate === 'string' && f.gate && typeof f.fingerprint === 'string' && validGateId(f.gate_id) && (f.action === 'open' || (f.action === 'kept' && f.actor !== 'interactive')))
     .map((f: any) => gateKey(f.fingerprint, f.gate_id)));
   const mine = dispositions.filter(d => open.has(gateKey(d.finding, d.gate_id)));
-  if (!mine.length) return [];
+  const holds = mine.length ? rowRange(cwd, row) : null;
+  return holds ? mine.filter(d => holds(d.head)) : [];
+}
+
+/**
+ * The owner's rulings that apply to a review row, as gstack-review-read reads it for Step 11.5 (harness-evals#498, HARN-1): a
+ * ruling for a finding the row carries that is not a gate finding (a ruling never closes one), recorded at a head inside the
+ * row's range by the same test dispositions use.
+ */
+export function ruledOn(cwd: string, row: Record<string, any>, notes: readonly RuledNote[]): RuledNote[] {
+  const fingerprints = new Set((Array.isArray(row?.findings) ? row.findings : []).flatMap((f: any) => f && !f.gate && typeof f.fingerprint === 'string' ? [f.fingerprint] : []));
+  const mine = notes.filter(n => fingerprints.has(n.finding));
+  const holds = mine.length ? rowRange(cwd, row) : null;
+  return holds ? mine.filter(n => holds(n.head)) : [];
+}
+
+/** Whether an owner's answer at `head` lies inside a review row's `range_base..commit_full` (both ends), or is the row's own commit when it has no range_base; null when those commits do not resolve. */
+function rowRange(cwd: string, row: Record<string, any>): ((head: string) => boolean) | null {
   const commitOf = (c: unknown) => typeof c === 'string' && /^[0-9a-f]{7,40}$/.test(c) ? spawnSync('git', ['rev-parse', '--verify', '--quiet', `${c}^{commit}`], { cwd, encoding: 'utf8', timeout: 10_000 }).stdout?.trim() ?? '' : '';
   const ancestor = (a: string, d: string) => spawnSync('git', ['merge-base', '--is-ancestor', a, d], { cwd, timeout: 10_000 }).status === 0;
   const to = commitOf(row.commit_full), from = row.range_base == null ? '' : commitOf(row.range_base);
-  if (!to || (row.range_base != null && !from)) return [];
-  return mine.filter(d => from ? ancestor(from, d.head) && ancestor(d.head, to) : d.head === to);
+  if (!to || (row.range_base != null && !from)) return null;
+  return head => from ? ancestor(from, head) && ancestor(head, to) : head === to;
 }
 
 /**

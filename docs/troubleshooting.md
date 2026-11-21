@@ -755,16 +755,17 @@ before the fetch instead of going on unprotected.
 process holding `<git dir>/gstack-leases/.lock`), then rerun.
 
 <a id="ship-lane-not-carried"></a>
-### `STOP: SHIP_LANE_NOT_CARRIED: lane <label> did not carry from a verified CI run at this tree, and --tests-only never starts a lane on its own ...`
+### `STOP: SHIP_LANE_NOT_CARRIED: lane <label> did not carry from a verified CI run at this tree, and preflight never starts a mapped lane on its own ...`
 
-**Meaning.** `gstack-ship-preflight --tests-only` was given a lane whose exact
+**Meaning.** `gstack-ship-preflight`, full or `--tests-only`, was given a lane whose exact
 command `origin/<base>`'s `.gstack/pregate.json` maps in `ship_lanes_from`,
 and no verified CI run carries it at this tree: the `CI_CARRY: none
 label=<label> (<reason>)` line above the STOP says why (`no_run`: CI has not
-run this tree yet; `dirty_tree`: uncommitted work). A mapped lane is the full
-suite, which can take most of an hour on a small machine (gbrain #9662: a
-50-minute unit lane on 4 CPUs), so `--tests-only` no longer starts it on its
-own (GST-3019).
+run this tree yet; `dirty_tree`: uncommitted work; `tree_mismatch`: the run
+tested a merge with an older base). A mapped lane is the full suite, which can
+take most of an hour on a small machine (gbrain #9662: a 50-minute unit lane on
+4 CPUs), so preflight never starts it on its own, whatever the reason (GST-3019;
+a full preflight did until GST-3277).
 
 **What is kept.** Nothing ran: no lane, mapped or not, started. The pregate
 line above it is the pregate's own verdict.
@@ -772,8 +773,13 @@ line above it is the pregate's own verdict.
 **Fix.** Follow the `NEXT:` lines. Commit and push the tree, dispatch the
 workflow they name (`gh workflow run <workflow> --ref <branch>`), wait with
 `gstack-ci-carry wait --base <base>`, and once it prints `CI_WAIT: green`
-rerun the same `--tests-only` command, which then carries the lane. To run the
-lane on this machine instead, rerun with `--run-uncarried-here`.
+rerun with `--tests-only` and the same `--lane` flags, which then carries the
+lane (a full preflight rerun with the same `--run` would stop on its open run). A workflow with no
+`workflow_dispatch` trigger, or a run profile that accepts no dispatched run,
+cannot be dispatched, so the `NEXT:` line says so: merge `origin/<base>` into
+the branch and push it, or, on a pull request you cannot push to, ask its
+author to. To run the lane on this machine instead, rerun with `--tests-only`
+and `--run-uncarried-here`.
 
 **Expected result.** `LANE: <label> carried run=<id>/<attempt> …`, or with
 `--run-uncarried-here`, `LANE: <label> pass …` from the run here.
@@ -1630,7 +1636,12 @@ or too large. Each message names the cap that applied:
 - **64 MiB source cap.** The full size of every such file outside dependency
   and VCS directories counts, including files over 1 MiB whose contents are
   withheld from the audit.
-- **Symlinks.** A tracked symlink anywhere in the repository stops the run.
+- **Special files.** A nonignored FIFO, socket or device inside the audit
+  scope (the whole repository, or the `--paths` directories) stops the run.
+  Symlinks do not: since the first release after v1.102.0.0 (#4540), each
+  tracked or nonignored symlink is listed in the report with its target string, or notes that the target was withheld when it matches a secret pattern
+  and is never followed, so a link to `/etc/passwd` or out through `..` is
+  reported, not read.
 
 **Fix.** No setting raises these caps. For the 64 MiB source cap, rerun with
 `--paths` set to the comma-separated repo-relative directories you want audited
@@ -1642,7 +1653,8 @@ With `--diff`, every changed path outside dependency directories must be inside
 `--paths`, or the run is refused. Do not audit a hand-trimmed copy: /cso would treat it as the whole
 repository and report nothing as skipped. `--paths` does not lower the
 manifest cap or the 100,000-entry limit, because every skipped path still has a
-manifest entry (about 50,000 files fit). Symlinks must be removed. Add your
+manifest entry (about 50,000 files fit). Remove or ignore a FIFO, socket or
+device, or narrow `--paths` past it. Add your
 file count or size to
 [#2993](https://github.com/garrytan/gstack/issues/2993).
 
@@ -2240,7 +2252,8 @@ a `--date` that is not a real `YYYY-MM-DD` day) or exceeds a length cap (ask, sc
 pending 300 characters, words 2,000). Exit 2. Nothing was written.
 `rule` and `lane-exception` refuse with this code too: a `--head` that is not
 a commit in the repository, a reason that is missing or holds a newline or
-control character, a `--by` naming gstack, any record while this checkout
+control character, a `--by` naming gstack (a crew named `GStack <Name>`, such as
+`GStack Minder`, is not gstack and may record), any record while this checkout
 holds an open /ship run, and for `lane-exception` a `--files` list that is
 empty or holds whitespace. `add` refuses a `ruled_note` or
 `test_lane_exception` scope ([ruled notes](ship-policy.md#ruled-notes),
@@ -2277,6 +2290,10 @@ the id has the minted shape `<name>-<14 digits>` (GST-2047; since GST-3015 the
 name ends in six random letters); a phone number in
 the rest of the directory name, the same id anywhere else, and every other
 finding in the row still refuse.
+Likewise a `pii.phone.e164` finding that starts inside the `stop=` run id of a
+fix-check round grant's scope (`review_round_grant <sha> pr=<n> kind=fix-check
+stop=507-7192673 findings=…`) is skipped (GST-3246); the same digits in the
+reason, the words or any other field still refuse.
 
 **Fix.** Record the words with the secret replaced by `[redacted]`, or ask the person to
 restate them. Rotate the secret if it was real.
@@ -3305,6 +3322,11 @@ exact tokens it finds in these positions:
   shape above (#4480). The same value on a line without that prefix, on a
   receipt-prefixed line inside a hand-written or non-receipt code block, or a
   phone number elsewhere on a receipt line still reports.
+- in a rendered `## Approvals` table (the header, its rule line and the
+  closing `Source: gstack-approvals record for …` footer `render` writes),
+  the `stop=` run id of a row whose Covers cell is a whole fix-check round
+  grant scope (GST-3246). The same digits in another cell, in prose or in a
+  table without that footer still report.
 
 A bare 11-digit number with none of that context, a 10-digit national number
 and an E.164 `+14155551234` still report, so the finding means the id stands
@@ -4142,9 +4164,13 @@ the base policy commit.
   split the PR. When published data under a pattern is kept as `code`
   (`REVIEW_EXCLUDE_KEPT: code …` on `.patch`, `.sha256` or extension-less files),
   add [`review_content_patterns`](ship-policy.md#review-content-patterns) for it. Files kept only for a secret line already count as their
-  excerpts ([secret-line excerpts](ship-policy.md#secret-line-excerpts)); one in
-  `DIFF_KEEP:` is kept for another reason, and one the excerpt could not be
-  built for moves to the reader's keep command and counts whole.
+  excerpts ([secret-line excerpts](ship-policy.md#secret-line-excerpts)), and so
+  do allowlisted data files kept only for gate tags ([gate-tagged data
+  excerpts](ship-policy.md#gate-tagged-data-excerpts)); one in `DIFF_KEEP:` is
+  kept for another reason, and one the excerpt could not be built for moves to
+  the reader's keep command and counts whole. The line's `files=` field and the
+  fix name the largest files left; a name holding a space, a comma or a colon is
+  quoted in `files=`.
 
 There is no override flag. See [the review ceiling](ship-policy.md#review-diff-ceiling).
 
@@ -7467,6 +7493,9 @@ note:` line ([ship-policy.md](ship-policy.md#ruled-notes)). A ruling at a head
 outside the range is listed as `not applied`, and a path edited after the
 fix-check still routes by the post-review rules. When the owner wants the
 findings fixed instead, fix them and ask for a grant for one more fix-check.
+A stopped final review or native reader row works the same way: its
+`gstack-review-read` reason lists each finding still waiting for a ruling, a
+`noted` CRITICAL included, so rule each listed fingerprint at the head it names.
 
 <a id="receipt-blocker-open"></a>
 ### `RECEIPT_BLOCKER_OPEN`

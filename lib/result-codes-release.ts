@@ -428,7 +428,7 @@ export const RELEASE_RESULT_CODES = {
   CI_CARRY_TREE_LOG_UNBOUND: {
     anchor: 'ci-carry-tree-log-unbound',
     summary: 'a CI run with no tree.json artifact (artifact storage full) has one GSTACK_TREE_JSON line in its job log, but the runner did not stamp it inside the step the run profile names in tree_log_step, at least a second after every earlier step ended and a second before every later one started, or that step is missing, repeated or did not succeed; a line printed anywhere else (a test, for one) is never evidence',
-    fix: 'print the line only from the step tree_log_step names, after the test step, with sleep 1 before it and sleep 2 after it (docs/pregate.md#tree-log-step); then dispatch a fresh run at the same head and rerun gstack-ci-carry wait',
+    fix: 'print the line only from the step tree_log_step names, after the test step, with sleep 1 before it and sleep 5 after it (docs/pregate.md#tree-log-step); then dispatch a fresh run at the same head and rerun gstack-ci-carry wait',
   },
   CI_CARRY_RERUN_MALFORMED: {
     anchor: 'ci-carry-rerun-malformed',
@@ -613,8 +613,8 @@ export const RELEASE_RESULT_CODES = {
   },
   REVIEW_PLAN_STOPPED: {
     anchor: 'review-plan-stopped',
-    summary: 'gstack-review-plan did not finish inside the pass (reason=timeout after timeout_ms, reason=signal when something killed it, reason=spawn when it could not start), so the review stopped before any reader ran: gstack-review-dispatch pass writes no manifest, and a plan run by itself prints no plan',
-    fix: 'rerun once unchanged; if it stops again, report this line and the repository\'s file count (git ls-files | wc -l) to your Captain; reason=signal: check the machine\'s free memory first',
+    summary: 'gstack-review-plan did not finish inside its limit (reason=timeout after timeout_ms, reason=signal when something killed it, reason=spawn when it could not start), so the review stopped before any reader ran: gstack-review-dispatch pass writes no manifest, render writes no brief, and a plan run by itself prints no plan',
+    fix: 'rerun once unchanged; if reason=timeout again on a large repository (git ls-files | wc -l in the hundreds of thousands), set GSTACK_REVIEW_PLAN_TIMEOUT_MS (milliseconds, default 180000) to about twice the plan\'s time and rerun; otherwise report this line and the file count to your Captain; reason=signal: check the machine\'s free memory first',
   },
   REVIEW_EXCLUDE_REFERENCE: {
     anchor: 'review-exclude-reference',

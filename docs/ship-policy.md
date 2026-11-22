@@ -88,7 +88,7 @@ branch that changes the policy.
 | `mechanical_retake` | `[{ path, template, fields, regen }]` | `[]` | A version or rules constant a branch may have to retake after a base merge, next to `bookkeeping`'s bounded kind: `path` is one literal file, `template` the whole line with one `{n}` (`const RULE_NUMBERS := {n}`), `fields` the `{ glob, field }` fixture fields that carry the same value, and `regen` the [`.gstack/generated.json`](pregate.md#generated) entry ids whose command regenerates its goldens. A post-review edit finish proves to be only that retake routes as `mechanical=`, with no reader and no review round; see [mechanical retakes](#mechanical-retake). At most 8 constants and 16 fields or ids each; no glob, `..`, `.gstack/` or `.github/` path. Read from the base revision only. Needs `min_gstack_version`. |
 | `test_code` | glob list | `[]` | Root-anchored globs of test code the built-in test names miss, never under `.gstack/` or `.github/`, and never matching a file there (`["tests/**/*.gd"]` for GDScript checks). A matching file changed after review routes as test code, one scoped reader of its test hunks, instead of behavior, beside the built-in globs; shared `helpers/` and `fixtures/` files stay behavior. See [test code and Godot UID sidecars](#test-code). Read from the base revision only. Needs `min_gstack_version`. |
 | `plan_record` | `off` \| `warn` \| `require` | `off` | <a id="plan-record"></a>Whether `gstack-ship-queue ready` and `land` (direct, stamp and train land) and `/ship`'s `gstack-ship-release finish --plan "<line>"` check the PR body's `Plan:` line (GST-1751). The line is the brief's (`Plan: approved: <run id or row id>`, `Plan: exempt: <reason>` or `Plan: required`), written under `## Approvals` by `gstack-approvals render --plan`. `ready` resolves it with lib/plan-record.ts against every branch's approval rows on the lane machine: a run id needs the newest gate revision's plan approval answered `approved`, in the owner's words, with no decision of that revision left unanswered; a row id needs an approved row that is not a ruling or grant, and a row from an autoplan run stands for that run's gate the same way; a broken or unreadable store refuses (`PLAN_STORE_UNAVAILABLE`) and never throws, and under `off` changes nothing; an exemption must be one crew/docs/captain.md lists or `crew:<rule>`; a diff of changelog fragments only needs no line. `finish` resolves the brief's line the same way before its first stage. `ready` (train ready included) prints `PLAN:` and writes the resolved record into the READY note; `land` checks that the note carries the PR body's current line and never reads the store. `warn` prints and continues; `require` refuses (`PLAN_RECORD_MISSING`, `PLAN_UNRESOLVED`, `PLAN_NOT_APPROVED`, `PLAN_EXEMPT_UNKNOWN`, `PLAN_STORE_UNAVAILABLE`, `QUEUE_PLAN_MISMATCH`). When this key is `off` or absent, the mode comes from `GSTACK_PLAN_RECORD` (a crew's opt-in), then `plan_record` in `<state root>/config.yaml` (`gstack-config set plan_record off|warn|require`: the untracked source for a repo that commits no `.gstack/`; a typo is rejected, and the `PLAN:` line names the file), then `warn` in a Capy session (`GSTACK_CAPY=1`), then `off`; a machine's key never loosens a tracked `warn` or `require`. A repo with no tracked policy gets the check at `ready` and `finish` only: ready writes no READY note there and `land` refuses before its plan step. Capy's state root does not survive a fresh machine, so a Capy crew that wants more than `warn` sets `GSTACK_PLAN_RECORD` in its project env. On a public or unknown-visibility repository `render --plan` writes `Plan: approved (record r-<12 hex>)`, an opaque id of the approval row (opaque, not secret), so no run id, row id or path reaches the PR body or the READY note pushed to origin; `ready` resolves it by hashing every row id it reads and then applies the row-id rules, and render refuses with no output when an approved line does not resolve. gstack never infers a feature from the diff, title or changelog. Read from the base revision only. Needs `min_gstack_version`. |
-| `ci_record_timeout_s` | integer seconds, at least 60 | `600` | <a id="ci-record-timeout"></a>How long `gstack-ship-release accept` lets one `gstack-evidence record-ci` run before it stops that lane. A value over 3600 is clamped to 3600. accept prints the bound it used as `CI_RECORD_TIMEOUT: <n>s (default)`, `(origin/<base> ci_record_timeout_s)` or `(… <value> is over the 3600s ceiling)`. Raise it when record-ci runs long, for example when it reruns a per_file remainder of CI-skipped files here (harness-evals #271 needed about 745 s). Read from the base revision only, so a branch can't raise its own bound. Needs `min_gstack_version`. |
+| `ci_record_timeout_s` | integer seconds, at least 60 | `600` | <a id="ci-record-timeout"></a>How long one `gstack-evidence record-ci` may run before it stops that lane, in `gstack-ship-release accept` and finish and in `gstack-ship-preflight`'s Step 5. A value over 3600 is clamped to 3600. accept and preflight print the bound they used as `CI_RECORD_TIMEOUT: <n>s (default)`, `(origin/<base> ci_record_timeout_s)` or `(… <value> is over the 3600s ceiling)`. Raise it when record-ci runs long, for example when it reruns a per_file remainder of CI-skipped files here (harness-evals #271 needed about 745 s). Read from the base revision only, so a branch can't raise its own bound. Needs `min_gstack_version`. |
 | `base_red` | `{ setup, select, timeout_sec }` or `null` | `null` | How `/ship` Step 5 proves a failure is the base branch's own before pausing on it; see [base_red](#base-red). Read from the base revision only. Needs `min_gstack_version`. |
 | `changelog_fragments` | `{ dir, required_checks? }` or `null` | `null` | PRs carry unversioned [CHANGELOG fragments](#changelog-fragments) in `dir` (one flat, repo-relative directory, no `..`) and the merge step ([`land`](#land)) assigns the version (under `merge: direct`, the [release PR](#release-stamp) does). `required_checks` (up to 50 distinct names) are the checks [`train land`](#stamped-trains-under-changelog_fragments-train-land) requires present and green on a stamp commit. `null` keeps `[Unreleased]` sections and per-PR stamps. Needs `min_gstack_version`. |
 
@@ -1464,9 +1464,28 @@ whose content files `/ship`'s reviewers leave out:
 the base commit it already resolved (`origin/<base>`, or `<base>`), never
 the branch's copy, so a branch cannot exclude its own files. A branch that adds
 the key gets `REVIEW_EXCLUDE: none (head sets review_exclude_paths; it applies
-after it lands on <base>)` and a normal review. A base policy that does not
-validate stops the plan (`POLICY_INVALID`), and a base git cannot read stops it
-(`POLICY_SOURCE_UNAVAILABLE`); neither turns exclusion off quietly.
+after it lands on <base>)` and a normal review. A base policy whose only errors
+are in `review_exclude_paths` or `review_content_patterns` (65 patterns, say,
+past the limit of 64) does not stop the plan: both keys are set aside, every
+file is reviewed as if the base excluded nothing, and every other key, the
+readers' `forbid_paths` included, applies as committed. The plan prints
+`REVIEW_EXCLUDE: fallback (WARNING: …)` naming each error and the fix, on
+stdout and stderr, `--json` carries `review_exclude.state: "fallback"`, the
+ship receipt records it as `review_exclude_fallback`, and every other step that
+reads the base policy (`gstack-ship-policy show-effective`, which prints the
+same warning on stderr, the pregate, the receipts, the merge step) reads it the
+same way, so the PR that corrects the list can be reviewed and land.
+`gstack-ship-policy validate` still reports the list as invalid. The PR's own
+list still doesn't count until it lands (GST-3399). Any other
+error in a base policy stops the plan (`POLICY_INVALID`), and a base git cannot
+read stops it (`POLICY_SOURCE_UNAVAILABLE`); neither turns exclusion off quietly.
+
+**Land the setting first.** Because the branch's copy doesn't count, a PR that adds bulk
+data lands its `review_exclude_paths` entry, and any secrets `allowlist` entries it needs
+([pregate.md](pregate.md#allowlist)), in a small PR of their own before the data PR opens.
+Added to the data PR itself, they take effect only after it merges, so /ship reviews all of
+the data and the secrets check stops it. Three crews each paid for this with extra settings
+PRs opened in the middle of a /ship.
 
 **Git's glob dialect.** Each pattern is a `:(top,glob)` pathspec: root-anchored
 and case-sensitive. The matched set comes from git itself (`git diff --raw -z`),
@@ -1631,7 +1650,8 @@ apply the same rule to the same input, so they build the same selection. The
 gate class and the record's `gate_tagged` list are unchanged: only how much of
 the data file a reader sees changes. Results PRs that commit captured agent
 sessions need this: the sessions quote lint pragmas, env checks and
-`--no-verify` pushes (harness-evals #494: 25 transcripts, 11.4 MB whole).
+`--no-verify` pushes (harness-evals #494: 25 transcripts, 11.3 MB (11,320,357
+bytes) whole).
 
 <a id="one-selection-every-reader"></a>
 **One selection for every reader (GST-1476).** Every path that renders a
@@ -1953,8 +1973,16 @@ merges one only when the lander passes `--accept-gate-disposition <approval id>`
 for it.
 
 Land works the dispositions out again at the pin from the PR branch's approval
-store: the local record and its mirror. A lander on another machine reads the
-mirror the owner recorded into, so set `GSTACK_APPROVALS_DIR` to that directory
+store: the local record and its mirror, plus the rows `ready` copied into the
+READY note. The store lives on the machine that recorded the row, often the
+/ship machine, so `ready` copies each disposition it applies at the head into the
+READY note on `refs/notes/gstack-trains`, signed and whole, and land on any
+machine reads those rows beside its own store under the same checks: the
+writer's fields, the digest, the PR's branch and the head in the pin's history.
+An edited note row counts for nothing, and the lander still accepts each one
+explicitly (#4581). A security-class disposition stays out of the note, because
+the notes ref is public, so for one of those a lander on another machine reads
+the mirror the owner recorded into: set `GSTACK_APPROVALS_DIR` to that directory
 when it isn't the default. Land counts every disposition whose head the pin
 contains. In a full clone, a row whose head commit is gone (the branch was
 rewritten and garbage-collected, or the name reused) doesn't apply, because the
@@ -3072,6 +3100,9 @@ gstack-release-stamp open            # --dry-run prints the stamp and creates no
 
 It stamps a fresh worktree of `origin/main` with `gstack-restamp --release`,
 commits the result on `release/<version>`, pushes that branch and opens its PR.
+On Capy (`GSTACK_CAPY=1`) it pushes the branch but leaves the PR to the host's
+PR tool, printing a `HOST_PUBLISH: pr-create` line instead
+([host publish](troubleshooting.md#host-publish)).
 The release stamp folds every fragment in `changelog.d/` under one new CHANGELOG
 heading and deletes the files. The new version is the base's plus the highest
 bump any fragment declares (the policy `bump` when none does). It reruns the

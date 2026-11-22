@@ -66,6 +66,11 @@ function scopeOfRange(root: string, binDir: string, base: string, head: string, 
 
 export type ReceiptExclude = NonNullable<ShipReceipt['review_exclude']>;
 
+/** The receipt's record of a base policy whose exclusion keys were set aside (GST-3399), or undefined when none were. */
+export function receiptExcludeFallback(x: Exclusion): ShipReceipt['review_exclude_fallback'] {
+  return x.state === 'fallback' ? { source: x.source, errors: x.errors } : undefined;
+}
+
 /** The receipt's copy of an active exclusion: counts and hashes, plus the gate-tagged kept paths the queue cannot recompute. */
 export function receiptExclude(x: Exclusion): ReceiptExclude | undefined {
   if (x.state !== 'active') return undefined;
@@ -482,7 +487,7 @@ export function receiptDepthVerdict(root: string, baseRef: string, r: ShipReceip
   const need = depthOfCommitInput({ ...c, scope, gateTagged: tagged, ...riskPathsOf(review), ...(x.state === 'active' ? { excluded: x.excluded } : {}) });
   const have = rd?.depth;
   const inputs = `base@${short(baseSha.ok ? baseSha.out : null)},registry@${short(c.registry.sha)},gate_scan@${scanBound ? short(rd!.gate_scan.head) : 'missing'}`;
-  const line = `REVIEW_DEPTH: receipt=${have ?? 'none'} required=${need.depth} runtime_lines=${need.runtimeLines} class=${need.class} reasons=${need.reasons.join(',')} inputs=${inputs} rounds=${r.review_loop?.rounds ?? (r.review_loop ? r.review_loop.passes + (r.review_loop.fix_checks ?? 0) : 'none')}`;
+  const line = `REVIEW_DEPTH: receipt=${have ?? 'none'} required=${need.depth} runtime_lines=${need.runtimeLines} class=${need.class} reasons=${need.reasons.join(',')} inputs=${inputs} rounds=${r.review_loop?.rounds ?? r.review_loop?.passes ?? 'none'}`;
   if (have === 'platform') {
     const pr = rd!.platform_review;
     const fits = need.depth === 'light' && platformFits(need.class, c.paths, need.runtimeLines, scanNumbers(c.added));

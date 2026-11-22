@@ -3362,6 +3362,9 @@ would have; `gstack-post` on GitLab uses the origin remote), `host=` when it is 
 github.com, a reply's comment, and a new PR's base, head (the current branch when `--head` is not passed) and draft
 state. Nothing reached GitHub yet. When the repository cannot be resolved the command refuses and prints no line,
 because a hand-off without one would land on whatever repository the host tool defaults to.
+`gstack-release-stamp open` does the same for a new release PR (`pr-create`) after it pushes `release/<version>`.
+/ship's test-failure triage prints no `HOST_PUBLISH:` line: on Capy it keeps its issue title and body files,
+prints where they are and runs no `gh issue create`.
 
 **Fix.** Publish the named files with the host's PR tool before the next gstack step, always passing `repo=`
 (Capy's `repo` argument) so a multi-repo or fork thread edits the right pull request; a `host=` the host tool
@@ -3839,6 +3842,14 @@ a typo never silently means "default".
 **Fix.** `gstack-ship-policy validate` lists every problem;
 `gstack-ship-policy init --explain` prints each key, its meaning and default.
 
+When the invalid file is the base branch's and its only errors are in
+`review_exclude_paths` or `review_content_patterns` (for example `more than 64
+patterns`), /ship does not stop: `gstack-review-plan` prints `REVIEW_EXCLUDE:
+fallback (WARNING: …)`, reviews every file and applies the base's other keys,
+so open a PR that corrects the list and ship it as usual
+([review_exclude_paths](ship-policy.md#review-exclude-paths)). Any other error
+on the base stops the plan and the merge step until a PR fixes it.
+
 <a id="policy-containment"></a>
 ### `POLICY_CONTAINMENT`
 
@@ -4217,16 +4228,37 @@ and ask a person with the log file.
 ### `REVIEW_PLAN_STOPPED`
 
 **Meaning.** `gstack-review-plan` did not finish inside its limit, so it printed
-no plan, or `gstack-review-dispatch pass`, which runs it before it writes a
-manifest, stopped without dispatching a reader (exit 1 either way). The line
-names the step (the plan command), `reason=timeout` with `timeout_ms` (180,000
-ms; `GSTACK_REVIEW_PLAN_TIMEOUT_MS` sets it in milliseconds), `reason=signal` with the signal when something else
-killed it, or `reason=spawn` when it could not start. Before this line existed, a
-plan that ran past the limit was killed with no output (GST-1442).
+no plan, or `gstack-review-dispatch pass` (which runs it before it writes a
+manifest) or `gstack-review-dispatch render` (which runs it for the base
+policy's `review_exclude_paths` before it writes a brief) stopped without
+dispatching a reader (exit 1 either way). The line names the step (the plan
+command), `reason=timeout` with `timeout_ms`, `reason=signal` with the signal
+when something else killed it, or `reason=spawn` when it could not start. Before
+this line existed, a plan that ran past the limit was killed with no output
+(GST-1442).
 
-**Fix.** Rerun once unchanged. If it stops again, report the line and the
-repository's file count (`git ls-files | wc -l`) to your Captain. For
-`reason=signal`, check the machine's free memory first.
+**The limit.** 180,000 ms (3 minutes) by default. Set
+`GSTACK_REVIEW_PLAN_TIMEOUT_MS` to a whole number of milliseconds to change it,
+for example `GSTACK_REVIEW_PLAN_TIMEOUT_MS=600000` for 10 minutes. The plan run
+by itself, `gstack-review-dispatch pass` and `render`, and
+`gstack-ship-preflight` all read the same variable, so set it once in the
+environment /ship runs in. An empty value, `0`, a negative number or anything
+that is not a number is ignored and the 180,000 ms default applies; a fraction
+is rounded down. `timeout_ms` in the line shows the limit that was actually used,
+so `timeout_ms=180000` after you set the variable means it did not reach the
+process.
+
+**Large repositories should set it.** The plan's time grows with the number of
+tracked files: on a 301,669-file repository it took 255 to 316 seconds on a
+2-core machine, so every /ship there stopped at the default before any reviewer
+ran (GST-3398). If `git ls-files | wc -l` is in the hundreds of thousands, set
+the limit to about twice the plan's measured time (`time gstack-review-plan
+--base <base>` with the variable set high) before running /ship.
+
+**Fix.** Rerun once unchanged. If it stops again with `reason=timeout` on a large
+repository, set `GSTACK_REVIEW_PLAN_TIMEOUT_MS` as above and rerun; otherwise
+report the line and the repository's file count (`git ls-files | wc -l`) to your
+Captain. For `reason=signal`, check the machine's free memory first.
 
 <a id="review-required-no-readers"></a>
 ### `gstack-review-plan: not run (commits after the reviewed head would ship with no reviewer ...) (review_required_no_readers)`
@@ -4273,6 +4305,10 @@ returned output or PR text. `verify` prints `FETCH_VIOLATION:` and refuses
 until the stage has rerun and swept clean. A test run's fixtures (a root
 carrying `.gstack-test-fixture`, or a repository whose remote resolves to a local
 path through `url.<base>.insteadOf`) print `FETCH_IGNORED:` and never count.
+Capy's `~/.capy/drive` is never walked, and the drive sync database under
+`~/.capy/drive-engine` (`state.db` and its `-wal`, `-shm` and `-journal` files)
+is ignored, so that database growing past 100 MB is not a violation. Any other
+new big file or repository under `~/.capy/drive-engine` still is.
 
 **Fix.** Nothing to rerun by hand: the pass plans one fresh attempt per slot
 (`RERUN:`, readers named `<reader>#2`; not a review round) and the pass program
@@ -5182,10 +5218,17 @@ a `why:` line, and when a `## Diagnostics` declaration is malformed. The
 result checks add two more (`decisions:` and `scoring:` in the message):
 `## Decisions` needs two or more `if <result>: <action>` lines with different
 actions, and `## Scoring` needs a `judge:` line, a model judge from another
-model family than every arm with `labels:` of 40 or more and `agreement:` of
+model family than every arm with `labels:` of 100 or more (40 for a plan
+frozen before 2026-11-22) and `agreement:` of
 0.6 or more, and with two or more arms `paired: yes`, `interval: 95%` and
 `mdd:`. A `frozen:` date before 2026-11-15 exempts both
-([docs/TESTING_INTERNALS.md](TESTING_INTERNALS.md#result-checks)).
+([docs/TESTING_INTERNALS.md](TESTING_INTERNALS.md#result-checks)). The
+eval-loop checks add `## Pilot`, `## Cost`, `## Interim look` (a counted run
+above $500), the judge's `per-arm:` and `effort:` lines, a regression-test bar
+for a "smaller change" arm and an `answers:` line under held-out exposure; a
+`frozen:` date before 2026-11-21 exempts them, and a `kind: quick look` plan
+is checked for its three lines and a cap of $100 or less instead
+([docs/TESTING_INTERNALS.md](TESTING_INTERNALS.md#eval-loop-checks)).
 
 **Fix.** Fill the named sections before any priced call. A plan that cannot
 name its stop rule or its held-out exposure is not preregistered; the pilot
@@ -5230,14 +5273,19 @@ in [docs/TESTING_INTERNALS.md](TESTING_INTERNALS.md#no-gstack-arm).
 
 **Meaning.** The preregistration's `## Scoring` names a model judge, and
 `gstack-eval-plan judge --check` or `results --check` found no `--labels`
-file, fewer labelled outputs than the preregistered count (at least 40), labels
+file, fewer labelled outputs than the preregistered count (at least 100, or 40 for a
+plan frozen before 2026-11-22), labels
 that are all one class (agreement is undefined), a repeated id, or a Cohen's
 kappa between the hand labels and the judge below the preregistered bar (at
-least 0.6). Until it passes, the judge's numbers do not count.
+least 0.6). With `per-arm: yes` in `## Scoring`, it also refuses a label row
+with no `arm`, rows naming an arm not in `## Arms`, an arm with no rows, or
+any arm whose own kappa is below the bar (its `JUDGE_ARM:` line). Until it
+passes, the judge's numbers do not count.
 
 **Fix.** Label outputs by hand from development or calibration rows, never
-held-out ones, as JSONL rows `{"id", "human", "judge"}`, covering every kind
-of output the judge scores, and pass the file with `--labels`. A judge below
+held-out ones, as JSONL rows `{"id", "human", "judge"}` (plus `"arm"` with
+`per-arm: yes`), covering every kind of output the judge scores and every
+arm, and pass the file with `--labels`. A judge below
 its bar is replaced or its prompt fixed and relabelled; the bar is not
 lowered. The rule is in
 [docs/TESTING_INTERNALS.md](TESTING_INTERNALS.md#result-checks).
@@ -5269,6 +5317,18 @@ must be read side by side.
 **Fix.** Add an `answer-only` column to the same table, counting failures by
 the grader's rule on the final answer alone, and report both readings. The
 rule is in [docs/TESTING_INTERNALS.md](TESTING_INTERNALS.md#result-checks).
+
+<a id="eval-quick-look-no-number"></a>
+### `EVAL_QUICK_LOOK_NO_NUMBER`
+
+**Meaning.** `gstack-eval-plan results --check` was given a quick look (a plan
+with `kind: quick look`). A quick look costs at most $100, takes a day and only
+opens or closes a question, so it publishes no number.
+
+**Fix.** Record the quick look's answer as an opened or closed question. To
+publish a number, write a counted-run preregistration (`prereg --init`), pilot
+each arm and run it. The rule is in
+[docs/TESTING_INTERNALS.md](TESTING_INTERNALS.md#eval-loop-checks).
 
 <a id="eval-arm-duplicate"></a>
 ### `EVAL_ARM_DUPLICATE`
@@ -5896,11 +5956,17 @@ edit `.gstack/eval-models.json` in a reviewed PR.
 <a id="eval-model-old-generation"></a>
 ### `EVAL_MODEL_OLD_GENERATION`
 
-**Meaning.** The rules declare `families` (newest first), and an arm uses an id
-that is not the first one in its family.
+**Meaning.** One of two rules refused a model. R116: a preregistration's arm,
+judge, reader or simulator, or a dry-run or pilot arm, is gpt-4o (any variant or
+snapshot) or a model `lib/pricing.ts` marks `superseded_by`; the
+`MODEL_GENERATION:` line names the model, its role and the replacement. Or the
+eval model rules declare `families` (newest first), and an arm uses an id that
+is not the first one in its family.
 
-**Fix.** Use the family's newest id, which the `EVAL_MODEL:` line names. If the
-order is wrong, fix `families` in a reviewed PR.
+**Fix.** Use the replacement the `MODEL_GENERATION:` or `EVAL_MODEL:` line names.
+A competitor system tested as its vendor ships it keeps its built-in model with a
+`vendor-default: <model> <system>` line in `## Models`; the results must name it.
+If the `families` order is wrong, fix it in a reviewed PR.
 
 <a id="eval-model-generation-unresolved"></a>
 ### `EVAL_MODEL_GENERATION_UNRESOLVED`
@@ -6335,9 +6401,11 @@ receipt's `gate_dispositions`, or the PR body's `Gate disposition:` lines, diffe
 from the store (`ready` refuses those too). Nothing was merged. The
 `GATE_DISPOSITION:` lines above the refusal are what the store holds at the pin;
 the receipt and the body aren't trusted for this, because the lane writes them.
-A receipt id the store lacks usually means this lander reads another
-`GSTACK_STATE_ROOT` or approvals mirror than the owner recorded into, or that the row
-was removed after the receipt was written. A pin missing from the clone, a shallow
+Land also reads the signed non-security rows `ready` copied into the READY note at
+the pin, under the same checks. A receipt id the store lacks usually means this
+lander reads another `GSTACK_STATE_ROOT` or approvals mirror than the owner recorded
+into (security-class rows never go in the note), or that the row was removed after
+the receipt was written. A pin missing from the clone, a shallow
 clone that can't prove whether a row's head is in the pin's history, and any other
 git error while checking a head also refuse here. In a full clone, a row whose head
 commit is gone after a rewrite and gc just doesn't apply.
@@ -7552,7 +7620,8 @@ or `no_verified_run` detail) and the lane runs here instead
 ([pregate.md](pregate.md#tree-log-step)).
 
 **Fix.** Print the line only from the named step, after the test step, with
-`sleep 1` before it and `sleep 2` after it, and make sure no test prints `GSTACK_TREE_JSON`. Then
+`sleep 1` before it and `sleep 5` after it (`sleep 2` after it is too short on
+runners that stamp output late), and make sure no test prints `GSTACK_TREE_JSON`. Then
 dispatch a fresh run at the same head and rerun `gstack-ci-carry wait`.
 
 <a id="ci-carry-rerun-malformed"></a>

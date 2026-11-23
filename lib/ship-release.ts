@@ -16,7 +16,9 @@ import { versionAtRef } from './restamp';
 import { classifyPath } from './review-depth';
 import { matchesAny } from './ship-policy';
 import { baseHolds, boundedPaths, comparePath, contextPacket, gateEditedPaths, isTestCode, PACKET_SECTION_CAP, readScopedReview, touchedPaths, type BoundedKind, type PatchSides } from './ship-patch';
-import { heldBy } from './ship-receipt';
+import { extractReceipt, heldBy, receiptRuns } from './ship-receipt';
+import { finishRun, readRunRecord } from './ship-run-record';
+import { bindFixCheckRow, type RowBinding } from './fix-check-clearing';
 import { locate, readRecord } from './approval-record';
 import { mechanicalPaths, writeMechanicalRecord } from './ship-mechanical';
 import { uidSidecars } from './ship-sidecar';
@@ -39,7 +41,7 @@ import { finishPlan, recordFinishPlan } from './plan-record';
 import { PREPUSH_CHECK_IDS } from './pregate/index';
 import { checkBranch, loadPlainTitlePolicy, type PlainFinding } from './plain-title';
 import { buildRunCheck } from './pregate/run-check';
-import { bin, carryLane, carryNoneLines, evidenceExempt, firstLine, flagReader, fragmentPath, gh, git, hostedOrigin, laneLine, lanes, mappedLanes, recordCiTimeout, releasePaths, Report, runLanes, sh, shipPolicy, shipRunMarker, short, stampedFiles } from './ship-bin-common';
+import { bin, carryLane, carryNoneLines, evidenceExempt, firstLine, flagReader, fragmentPath, gh, git, hostedOrigin, laneLine, lanes, mappedLanes, recordCiTimeout, releasePaths, Report, runLanes, sh, shipPolicy, short, stampedFiles } from './ship-bin-common';
 
 export const RELEASE_HELP = `gstack-ship-release — /ship Steps 12 and 15-17 (ship/SKILL.md)
 
@@ -252,7 +254,7 @@ function patchBase(cwd: string, baseRef: string, commit: string, parent: string 
   return parent && fork && holds(parent, commit) && holds(fork, parent) ? parent : fork;
 }
 
-type FixLink = { row: Record<string, any>; commit: string; from: string };
+type FixLink = { row: Record<string, any>; commit: string; from: string; bound?: RowBinding };
 type BridgeOpts = { reviewed: string; baseRef: string; metadata: (p: string) => boolean; bookkeeping: readonly string[]; testCode: readonly string[] };
 
 /**
@@ -299,12 +301,14 @@ function fixChecked(cwd: string, o: BridgeOpts & { now: string; parent?: string;
   const ancestor = (a: string, d: string) => git(cwd, ['merge-base', '--is-ancestor', a, d]).status === 0;
   const onBranch = (c: string) => !!c && ancestor(c, 'HEAD');
   const commits = rows.map(row => commitOf(row.commit_full));
+  const approvals = (loc => 'file' in loc ? readRecord(loc).rows : [])(locate({ cwd, env: process.env }));
   const chain: FixLink[] = [];
   let gap = '', bridged = '';
   for (let i = rows.length - 1; i >= 0;) {
-    const link = { row: rows[i]!, commit: commits[i]!, from: commitOf(rows[i]!.range_base) };
+    const row = rows[i]!, bound = row.fix_check_base !== undefined ? bindFixCheckRow(cwd, row, reviewRoundGrants(approvals)) : undefined;
+    const link = { row, commit: commits[i]!, from: commitOf(bound ? row.fix_check_base : row.range_base), bound };
     chain.unshift(link);
-    if (!onBranch(link.from) || git(cwd, ['rev-parse', `${link.from}^{tree}`]).stdout.trim() === o.reviewed) break;
+    if (bound?.ok || !onBranch(link.from) || git(cwd, ['rev-parse', `${link.from}^{tree}`]).stdout.trim() === o.reviewed) break;
     i = commits.slice(0, i).lastIndexOf(link.from);
     const bridge = i < 0 ? docsBridge(cwd, link.from, o) : null;
     if (bridge) bridged = `FIX_CHECK_DOCS_BRIDGE: range_base ${link.from.slice(0, 12)} follows the reviewed commit ${bridge.reviewedAt.slice(0, 12)} by docs or release metadata only (${bridge.commits.map(c => c.slice(0, 12)).join(',')})`;
@@ -316,13 +320,13 @@ function fixChecked(cwd: string, o: BridgeOpts & { now: string; parent?: string;
   const gates = readGateDispositions(cwd);
   for (const d of gates) r.add(`GATE_DISPOSITION: ${gateDispositionText(d)}${reviewRows.some(v => dispositionedOn(cwd, v, [d]).length) ? '' : ' (no open gate finding at this fingerprint on a review row whose range holds this head; not applied)'}`);
   const gatedOn = (l: FixLink) => new Set(dispositionedOn(cwd, l.row, gates).map(d => gateKey(d.finding, d.gate_id)));
-  const grants = chain.length ? (loc => 'file' in loc ? readRecord(loc).rows : [])(locate({ cwd, env: process.env })).filter(g => g.outcome === 'approved' && (`${g.ask} ${g.scope}`.includes('review_loop_grant') || reviewRoundGrants([g]).some(x => x.kind === 'fix-check'))) : [];
+  const grants = approvals.filter(g => g.outcome === 'approved' && (`${g.ask} ${g.scope}`.includes('review_loop_grant') || reviewRoundGrants([g]).some(x => x.kind === 'fix-check')));
   const granted: (typeof grants[number] | undefined)[] = [];
   const used = new Set<string>();
   for (let k = chain.length - 1; k >= 0; k--) {
     const l = chain[k]!;
-    const g = grants.filter(g => !used.has(g.id))
-      .flatMap(g => { const fc = reviewRoundGrants([g]).find(x => x.kind === 'fix-check'); return (fc ? (commitOf(fc.head) === l.from ? [fc.head] : []) : `${g.ask} ${g.scope}`.match(/\b[0-9a-f]{7,40}\b/g) ?? []).map(commitOf).filter(c => !!c && inRange(l, c)).map(stop => ({ g, stop })); })
+    const g = l.bound?.ok ? (id => grants.find(x => x.id === id && !used.has(x.id)))(l.bound.grant.approval) : grants.filter(g => !used.has(g.id))
+      .flatMap(g => { const fc = reviewRoundGrants([g]).find(x => x.kind === 'fix-check' && !x.legacy); return (fc ? (commitOf(fc.head) === l.from ? [fc.head] : []) : `${g.ask} ${g.scope}`.match(/\b[0-9a-f]{7,40}\b/g) ?? []).map(commitOf).filter(c => !!c && inRange(l, c)).map(stop => ({ g, stop })); })
       .reduce<{ g: typeof grants[number]; stop: string } | undefined>((best, c) => (!best || ancestor(best.stop, c.stop) ? c : best), undefined)?.g;
     if (g) used.add(g.id);
     granted[k] = g;
@@ -331,7 +335,7 @@ function fixChecked(cwd: string, o: BridgeOpts & { now: string; parent?: string;
   const why = (l: FixLink) => {
     const read = l.row.wtree ?? l.row.review_binding?.end_wtree;
     const fresh = reviewFreshness(l.row, read, ruledOn(l), gatedOn(l));
-    return fresh?.status !== 'CURRENT' ? fresh?.reason ?? 'not a review row'
+    return l.bound && !l.bound.ok ? `the granted fix-check row: ${l.bound.why}` : fresh?.status !== 'CURRENT' ? fresh?.reason ?? 'not a review row'
       : l.row.tree !== read || !onBranch(l.commit) ? 'the row was logged on content no branch commit holds'
       : !onBranch(l.from) ? 'the row names no range_base commit on this branch' : '';
   };
@@ -570,16 +574,26 @@ function docsFresh(cwd: string, base: string, postFile: string, moved: readonly 
   return true;
 }
 
-/** Steps 15-16; once they pass, the /ship run's preflight marker is cleared, so a full preflight may merge the base again (GST-1204). */
+/**
+ * Steps 15-16; once they pass, the /ship run's record is removed, so a full preflight may merge the base again (GST-1204). Only the
+ * record of a run the open PR's body names (a stub, stop, grant or receipt entry) is removed, or any run's when no PR is open: a late
+ * finish never removes another run's record (GST-3260); gh failing keeps it.
+ */
 export async function finish(argv: readonly string[], cwd: string): Promise<Report> {
   const { flag } = flagReader(argv);
   const plan = finishPlan(cwd, flag('--base')!, flag('--plan'));
   if (plan.failure) return new Report().add(plan.line!).stop(`${plan.failure.message} (${plan.failure.code}); fix: ${plan.failure.fix}`);
   const r = await finishStages(argv, cwd);
   if (plan.line) r.lines.unshift(plan.line);
-  if (r.exit === 0) recordFinishPlan(cwd, flag('--plan') ? plan.record : undefined);
-  const marker = r.exit === 0 && shipRunMarker(cwd);
-  if (marker) fs.rmSync(marker, { force: true });
+  if (r.exit !== 0) return r;
+  recordFinishPlan(cwd, flag('--plan') ? plan.record : undefined);
+  if (readRunRecord(cwd).kind === 'none') return r;
+  const branch = git(cwd, ['branch', '--show-current']).stdout.trim();
+  const listed = hostedOrigin(cwd) && branch ? gh(cwd, ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'body', '--jq', '.[0].body // empty']) : undefined;
+  const body = listed?.status === 0 ? listed.stdout.trim() : '';
+  const ended = listed && listed.status !== 0 ? { line: `RUN_RECORD: kept (gh pr list failed: ${firstLine(listed.stderr)}; finish removes a run record only when the PR body names its run)` }
+    : finishRun(cwd, body ? [...receiptRuns(body), extractReceipt(body).receipt].flatMap(e => typeof e?.run === 'string' ? [e.run] : []) : null);
+  if (ended.line) r.add(ended.line);
   return r;
 }
 
@@ -658,7 +672,7 @@ async function finishStages(argv: readonly string[], cwd: string): Promise<Repor
     if (!/^(pass|warn)/.test(verdict)) return r.stop(`pregate preflight ${verdict} on the stamped tree: fix it, then rerun finish`);
     return r.next(`Step 16 stage 5, then Step 17's guard block and gstack-ship-release push; then gstack-ship-release accept --base ${base} ${laneArgs} carries ${deferred.join(', ')} from CI at the pushed head${loop ? '; Step 18 records the same exception with gstack-ship-receipt write --review-loop-exception' : ''}`);
   }
-  const v = bin(cwd, 'gstack-pregate', ['verify'], 60_000);
+  const v = bin(cwd, 'gstack-pregate', ['verify', '--base', base], 60_000);
   if (v.status === 0) r.add('PREGATE: verify ok on the stamped tree');
   else {
     const policy = lanesOnlyHeadPolicy(cwd, base);

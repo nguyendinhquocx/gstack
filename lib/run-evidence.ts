@@ -105,6 +105,8 @@ const PROFILE_KEYS = ['workflow', 'events', 'jobs', 'artifact', 'max_age_hours',
 const WORKFLOW_FILE = /^[A-Za-z0-9_.-]+\.ya?ml$/;
 const NAME = /^[A-Za-z0-9_.\/-]{1,128}$/;
 export const DEFAULT_MAX_AGE_HOURS = 24;
+/** The scratch branch land.merged_ci runs CI on (lib/land-merged-ci.ts), whose run a main push of that land may reuse (scripts/ci-tree-reuse.ts). */
+export const landBranch = (pr: number | string): string => `gstack-land/${pr}`;
 const MAX_ARTIFACT_BYTES = 8 * 1024 * 1024;
 /** Same-named artifacts one run may hold, one per attempt of the job that uploads it. */
 const MAX_ARTIFACT_ATTEMPTS = 10;
@@ -171,6 +173,8 @@ export function runProfileErrors(profiles: unknown, gateRuns: unknown): Array<{ 
   return errors;
 }
 
+/** Newer-run conclusions that never veto: a green run, and a skipped or neutral one, which ran no job that could fail (GST-3514, GST-3554). */
+const QUIET = ['success', 'skipped', 'neutral'];
 const fail = (reason: RunRefusal, detail: string, fix?: string): RunVerdict => ({ ok: false, reason, detail, ...(fix ? { fix } : {}) });
 /** When a run's newest attempt started. A run vetoes the candidate when it started at or after the second the candidate was created: a red re-run of an older run counts, and re-running the candidate does not hide a failure in between. */
 const started = (r: ApiRun): string => r.run_started_at ?? r.created_at ?? '';
@@ -221,7 +225,7 @@ export function verifyRun(deps: RunDeps, o: { repo: string; runRef: string; prof
     }
     const heads = [...new Set([run.head_sha, ...(o.vetoHeads ?? []).filter(h => SHA.test(h))])];
     for (const head of heads) {
-      const newer = deps.runsForHead(p.workflow, head).filter(r => !(r.id === id && r.run_attempt === run.run_attempt) && r.id !== o.ignoreRun && started(r) >= (run.created_at ?? '') && !(r.status === 'completed' && r.conclusion === 'success'));
+      const newer = deps.runsForHead(p.workflow, head).filter(r => !(r.id === id && r.run_attempt === run.run_attempt) && r.id !== o.ignoreRun && started(r) >= (run.created_at ?? '') && !(r.status === 'completed' && QUIET.includes(r.conclusion ?? '')));
       if (newer.length) return fail('newer_run_vetoes', `newer run ${newer[0]!.id} of ${p.workflow} on ${head.slice(0, 12)} is ${newer[0]!.status === 'completed' ? newer[0]!.conclusion : newer[0]!.status}`);
     }
     if (p.skippable && p.skippable.jobs.every(j => skippedJobs.includes(j)) && o.docsOnly?.(run.head_sha)) {

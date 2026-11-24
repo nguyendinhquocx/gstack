@@ -951,7 +951,8 @@ once:
   `tree.json` must name the head (`head_sha`) and the merge commit (`sha`), and
   the tree git computes for that merge commit must equal the head's tree: the
   head already contained its base, so the merge tested exactly the head tree
-  (`tree_mismatch` otherwise). The API answers with
+  (`tree_mismatch` otherwise), unless only the base moved
+  ([below](#base-moved-carry)). The API answers with
   the newest attempt, so an earlier green attempt under a newer red one is
   refused, and the run is read again after the evidence is collected: a new
   attempt meanwhile is `run_changed`. A newer run of the same workflow on the
@@ -1259,8 +1260,18 @@ the Ubicloud VM (`gstack-pregate --stage tests --remote`) is an opt-in for when
 no such run exists. The order after a push: wait for Free Tests
 (`gstack-ci-carry wait --base main`), then `gstack-pregate
 --allow-repo-commands`. A `pull_request` run tests GitHub's merge commit, so on
-a branch that does not contain the base tip it tested another tree and
-`CI_CARRY` says `none (no_verified_run: … tree_mismatch)`: dispatch Free Tests
+a branch that does not contain the base tip it tested another tree.
+<a id="base-moved-carry"></a>That run still carries for HEAD when only the base
+moved (GST-3567): the merge commit is HEAD merged onto a commit of the base, and
+the pull request's own added and removed lines in it are byte-identical to
+HEAD's at the same places (`lib/pregate/run-check.ts` `onlyBaseMoved`, used by every lane carry and by
+`clear --run`, never by land's merged-tree CI; why that is safe:
+[ship-policy.md](ship-policy.md#ci-carry-base-moved)). The receipt adds
+`base_moved=<base commit>`. GitHub merges onto the base as it was when the run
+started, so when that base commit is newer than your checkout's `origin/main`,
+the check fetches main once before it refuses. Otherwise `CI_CARRY` says
+`none (no_verified_run: … tree_mismatch)`, with a `CARRY_DIAGNOSIS:` line
+when the rule refused: dispatch Free Tests
 on the branch
 (`gh workflow run free-tests.yml --ref <branch>`), which tests HEAD's own tree,
 and wait again. When the pull_request run tested that merge commit, the
@@ -1474,8 +1485,10 @@ them (`ci_carried=<lane>:<run>/<attempt>`). A run whose `tree.json` lists
 from its job log adds `tree_source: "job-log"` to its entries and
 `tree_source=job-log` after them ([tree_log_step](#tree-log-step)). Each `record-ci` gets the base
 policy's [`ci_record_timeout_s`](ship-policy.md#ci-record-timeout) (600 s by
-default, 3600 s at most), in preflight's Step 5 and finish as well as in accept, and accept and
-preflight print it as `CI_RECORD_TIMEOUT:`.
+default, 3600 s at most) to find and verify the CI run, in preflight's Step 5 and finish as well as in accept, and accept and
+preflight print it as `CI_RECORD_TIMEOUT:`. The local runs that follow
+`CI_RECORD_PHASE: local` (a `per_file` remainder or an exception preflight)
+don't count against it and get up to an hour more.
 
 <a id="record-ci-reuse"></a>**record-ci reuses its own row at the same tree (GST-1795).** Step 5's
 carry and accept both call `record-ci`, so at an unchanged pushed tree the
@@ -1587,7 +1600,7 @@ workflow on the merged commit, on the scratch branch `gstack-land/<n>`
 ([ship-policy.md](ship-policy.md#land-direct)), and GitHub's merge has that
 same tree unless main moved again before the merge. So when the head's tree
 differs, `find` takes the newest `workflow_dispatch` run on `gstack-land/<n>`
-and reuses it only when `verifyRun` accepts it and its `tested-tree` record
+that wasn't cancelled (land passes cancelled runs over too) and reuses it only when `verifyRun` accepts it and its `tested-tree` record
 names the pushed tree (`no_verified_run` or `tree_mismatch` otherwise; a branch
 with no such run keeps `tree_mismatch`). Only the newest run counts, newest by run id
 rather than start time, so a red retry on the same tree is never hidden

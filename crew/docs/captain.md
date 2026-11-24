@@ -327,11 +327,23 @@ went stale and conflicting, and started to look like junk.
   outside PRs with no verdict after 5 days, and re-own each one. Nothing is closed for
   being old.
 - **Close only as landed, superseded or dropped.** A crew PR closes only as landed (link
-  the merge commit), superseded (link the replacement) or dropped (quote the decision).
+  the merge commit), superseded (link the replacement) or dropped (quote the decision, and
+  link the write-up when an attempt was shelved: [Write it up before you shelve it](#write-it-up-before-you-shelve-it)).
   Anything else is salvage: a live owner rebuilds it onto current main, in the area's next
   wave when the queue is long. Old and conflicting is how finished work looks when its
   owner went away, not a reason to close it. Age a PR by its `createdAt`: bots touch every
   PR, so "last updated" means nothing.
+
+## Write it up before you shelve it
+
+When an attempt closes as failed, shelved, cut, null or not now (an experiment, an eval
+arm, a prototype, a dropped PR), the lane writes a short write-up first, from
+[docs/shelved-attempt.md](../../docs/shelved-attempt.md): takeaways, what worked, what
+didn't with its numbers, why it's shelved, what would reopen it, where the data is, what
+wasn't done, what went wrong on our side, and cost. Every close links it: the issue's
+Canceled comment, the PR's close comment, the lane's report and a "Why null?" verdict.
+Before archiving, `gstack-archive-check thread` prints a `NOTE:` for each PR that closed
+without merging; when that close was a shelve, check the write-up is linked.
 
 ## Keep issues tidy
 
@@ -431,6 +443,18 @@ gates ready and /ship finish only, since land needs the tracked policy; on Capy,
 machine starts without it, put `GSTACK_PLAN_RECORD` in the project env. On a public repo
 render writes `Plan: approved (record r-<id>)` in place of the brief's run id, and ready
 resolves that id to the same approval row.
+
+**First versions.** A first version of anything a person uses (an app, a Mac helper, a new
+route on the owner's box) is a plan with a `### Day one` section, or `--first-version`. Its
+plan quotes the owner's own messages that state the job under `### Owner's words`, each with
+its time and a line: `does it`, `choice` (a lettered choice recommending the build unless the
+line gives a reason to leave it out). Nothing his words
+asked for sits under "What it won't do yet"; the gate letters it, and every cut on a first
+version gets its own letter. The five day-one rows cite those quotes. Before the owner is asked
+to try it, the build clears `gstack-first-use` ([docs/first-use-check.md](../../docs/first-use-check.md)):
+an agent from another model family follows the exact try-it message on the real target and
+records a verdict per step. A one-page day-one plan written without `/autoplan` (an app build
+under the owner's standing rule) carries the same two sections, so the same check reads it.
 
 The copy-paste brief is [`captain/templates/brief.md`](../../captain/templates/brief.md): the
 plan and the ask as step 1, the build after the word as step 2, /ship to READY as step 3,
@@ -642,7 +666,7 @@ What to do with each refusal (nothing was merged unless the code says so):
 | `QUEUE_RECEIPT_MISSING` / `QUEUE_RECEIPT_STALE` | lane | /ship at the pin |
 | `QUEUE_NOT_READY` | lane, or Captain | no READY note: `ready --pr <n> --no-screen` at the pin; `merge: train`: use the train; closed or retargeted PR: as named |
 | `QUEUE_LAND_CHECKS` | Captain, then lane | pending: `gstack-pr-wait <n> --until green` and rerun; red: back to the lane (rule 16 rerun for a flaky case); missing: dispatch the workflow on the branch |
-| `QUEUE_LAND_MERGED_CHECKS` | Captain, then lane | the message says the checks changed files land's git or gh calls read: hold, nothing goes back to the lane yet; restore each named path from a trusted copy, release the lock with `land --pr <n> --pin <sha>` (no `--allow-repo-commands`), and find out why the checks wrote there. Otherwise a `land.merged_checks` command failed, or the `land.merged_ci` run was red, on the pin merged onto main: one rerun of land for a flaky case (rule 16), else back to the lane, which merges main (rule 19), fixes it, /ship, `ready`, new READY ([troubleshooting](../../docs/troubleshooting.md#queue-land-merged-checks)) |
+| `QUEUE_LAND_MERGED_CHECKS` | Captain, then lane | the message says the checks changed files land's git or gh calls read: hold, nothing goes back to the lane yet; restore each named path from a trusted copy, release the lock with `land --pr <n> --pin <sha>` (no `--allow-repo-commands`), and find out why the checks wrote there. Otherwise a `land.merged_checks` command failed, or the `land.merged_ci` run was red, on the pin merged onto main: one rerun for a flaky case (rule 16; for a red `land.merged_ci` run that is `gh run rerun <id>` then land, since land reuses that run), else back to the lane, which merges main (rule 19), fixes it, /ship, `ready`, new READY ([troubleshooting](../../docs/troubleshooting.md#queue-land-merged-checks)) |
 | `QUEUE_LAND_NOT_CLEAN` | lane, or Captain | `CONFLICTING`, or the pin conflicts with main's tip on a stale base: the lane merges main (rule 19), /ship, `ready`; `UNKNOWN`: rerun in a minute |
 | `QUEUE_TRAIN_FROZEN` / `QUEUE_LAND_LOCKED` | Captain | finish the repair or the holder first. land takes over a lock whose land exited or expired by itself; a lock it refuses says why: a land still running (wait, or stop the process it names if stuck), another machine's land (rerun after the expiry it prints, or `--break-lock` once you know that land stopped), or a deliberate hold (release it as the `LOCK:` line says) |
 | `QUEUE_TRAIN_UNTRUSTED` | Captain | a fork head; rewrite on a crew branch |

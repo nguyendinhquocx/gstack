@@ -68,6 +68,13 @@ function fixCheck(c: Cap, o: { grant: string; run: string; fixList: string; row?
   return prompt;
 }
 
+/** A fix-check read logged with no claim (the gstack-review-plan --grant path): no claim stamps it, so it names no grant. */
+function unclaimedFixCheck(c: Cap, row: Record<string, unknown> = {}) {
+  c.f.write({ 'src/x.ts': 'export const x = 3;\n' }); c.f.commit('fix');
+  const start = ok(c.run('gstack-review-log', ['--start', 'review-fix-check'])).trim();
+  ok(c.run('gstack-review-log', [JSON.stringify({ skill: 'review-fix-check', timestamp: new Date().toISOString(), via: 'ship', review_scope: 'frozen', ...CLEAN, ...row }), '--finish', start]));
+}
+
 function write(c: Cap, run: string) {
   const loop = path.join(c.f.root, 'loop.json');
   ok(c.run('gstack-review-scope', ['summary', '--since', c.since, '--no-ledger', '--out', loop]));
@@ -111,14 +118,19 @@ describe('one grant kind: planner, claim and receipt accept either row (GST-3546
     expect(w.stderr).toContain(`FIX_CHECK_CLEAR: grant=${id} run=r2 closed=${ID}`);
   });
 
-  // Value: protects=GST-3546: gstack-review-plan --grant takes a round-grant fix-check row too, at the head it names;
-  //   fails_when=--grant refuses it ("no approved row ... naming review_loop_grant"); seam=gstack-review-plan --grant
-  test('the planner plans the fix-check for a round-grant fix-check row', () => {
+  // Value: protects=GST-3546: gstack-review-plan --grant takes a round-grant fix-check row too, at the head it names; since
+  //   GST-3562 A it buys the fix-check only at the stop after a round-2 fix-check, and after a round-2 full pass the fix gets the
+  //   read-only full review instead; fails_when=--grant refuses the row ("no approved row ... naming review_loop_grant"), or the
+  //   grant swaps the read-only review for a fix-check; seam=gstack-review-plan --grant
+  test('the planner takes a round-grant fix-check row: the fix-check after a round-2 fix-check, the read-only full review after a round-2 full pass', () => {
     const c = atCap([open(ID, FP)]);
     const id = grantId(ok(c.run('gstack-approvals', ['round-grant', '--pr', '7', '--head', c.S, '--kind', 'fix-check', '--reason', 'Captain ruled: fix it', '--by', CAPTAIN, '--owner-ref', 'GSTA-36:2026-11-22T12:00:00Z', '--words', 'fix it'])));
     const plan = c.run('gstack-review-plan', ['--base', 'main', '--gate-tagged', '0', '--pass', '2', '--last', 'full', '--fixed-blocking', '--range-base', c.S, '--grant', id]);
     expect(plan.status, plan.stderr).toBe(0);
-    expect(plan.stdout).toContain(`NEXT: fix-check (the owner's grant ${id}`);
+    expect(plan.stdout).toContain('NEXT: full (read-only final review (R51)');
+    const after = c.run('gstack-review-plan', ['--base', 'main', '--gate-tagged', '0', '--pass', '1', '--last', 'fix-check', '--fix-checks', '1', '--fixed-blocking', '--range-base', c.S, '--grant', id]);
+    expect(after.status, after.stderr).toBe(0);
+    expect(after.stdout).toContain(`NEXT: fix-check (the owner's grant ${id}`);
   });
 });
 
@@ -218,6 +230,35 @@ describe('a grant spends only on a counted fix-check (gskills#24, gskills#25)', 
     expect(p.status, p.stderr).toBe(0);
     expect(p.stderr).toContain(`FIX_CHECK_HUNKS: built from git diff ${c.S.slice(0, 12)} HEAD`);
     expect(p.stdout).toContain('src/y.ts');
+  });
+
+  // Value: protects=a grant buys one round: a fix-check grant an unclaimed fix-check already spent (an owner's review_loop_grant
+  //   or a round-grant planned through gstack-review-plan --grant, neither of which leaves a claim in the PR body) cannot be
+  //   claimed for a second read; fails_when=claim prints GRANT_CLAIMED; seam=gstack-ship-receipt claim
+  test('claim refuses GRANT_SPENT for a grant an unclaimed counted fix-check already spent', () => {
+    for (const legacy of [true, false]) {
+      const c = atCap([open(ID, FP)]);
+      const id = legacy
+        ? JSON.parse(ok(c.run('gstack-approvals', ['add', '--ask', `Owner grant: one scoped fix-check after round 2 (review_loop_grant ${c.S})`, '--words', 'do it', '--by', CAPTAIN, '--scope', 'this /ship invocation', '--owner-ref', 'GSTA-36:2026-11-22T12:00:00Z', '--json']))).added[0] as string
+        : grantId(ok(c.run('gstack-approvals', ['round-grant', '--pr', '7', '--head', c.S, '--kind', 'fix-check', '--reason', 'fix it', '--by', CAPTAIN, '--owner-ref', 'GSTA-36:2026-11-22T12:00:00Z', '--words', 'fix it'])));
+      unclaimedFixCheck(c);
+      expect(rows(c).filter(x => x.skill === 'review-fix-check').at(-1)?.grant).toBeUndefined();
+      const r = c.run('gstack-ship-receipt', ['claim', '--body', c.body, '--pr', '7', '--run', 'r2', '--grant', id]);
+      expect([legacy, r.status, r.stdout]).toEqual([legacy, 3, '']);
+      expect(r.stderr).toContain('GRANT_SPENT');
+      expect(fs.readFileSync(c.body, 'utf8')).not.toContain(id);
+    }
+  });
+
+  // Value: protects=the negative controls: an unspent grant still claims, a malformed row spends nothing, and the run that holds
+  //   the claim may claim again after its own read; fails_when=claim refuses any of them; seam=gstack-ship-receipt claim
+  test('claim still takes an unspent grant, one only a malformed row read, and this run\'s own claim again', () => {
+    const c = atCap([open(ID, FP)]);
+    const id = grantId(ok(c.run('gstack-approvals', ['round-grant', '--pr', '7', '--head', c.S, '--kind', 'fix-check', '--reason', 'fix it', '--by', CAPTAIN, '--owner-ref', 'GSTA-36:2026-11-22T12:00:00Z', '--words', 'fix it'])));
+    unclaimedFixCheck(c, { converged: false });
+    ok(c.run('gstack-ship-receipt', ['claim', '--body', c.body, '--pr', '7', '--run', 'r2', '--grant', id]));
+    fixCheck(c, { grant: id, run: 'r2', fixList: 'fix ' + ID + '\n', claim: false });
+    expect(ok(c.run('gstack-ship-receipt', ['claim', '--body', c.body, '--pr', '7', '--run', 'r2', '--grant', id]))).toContain(`GRANT_CLAIMED: grant=${id}`);
   });
 });
 

@@ -763,7 +763,16 @@ command `origin/<base>`'s `.gstack/pregate.json` maps in `ship_lanes_from`,
 and no verified CI run carries it at this tree: the `CI_CARRY: none
 label=<label> (<reason>)` line above the STOP says why (`no_run`: CI has not
 run this tree yet; `dirty_tree`: uncommitted work; `tree_mismatch`: the run
-tested a merge with an older base). A mapped lane is the full suite, which can
+tested a merge of the branch with main that counts for no commit here). A
+`pull_request` run that tested the branch merged onto a newer main still
+carries when only the base moved: the merge is of this pushed head, and the
+branch's own added and removed lines in it are byte-identical to the head's at
+the same places, so main changed no line the branch changes and none next to
+one. That is safe because the run tested
+exactly the branch's changes on a newer main, and land checks the tree that
+lands with `land.merged_ci` ([ship-policy.md](ship-policy.md#ci-carry-base-moved)).
+When that rule refuses, a `CARRY_DIAGNOSIS:` line says why: main also changed
+a line the branch changes or one next to it, or the merge is of another commit. A mapped lane is the full suite, which can
 take most of an hour on a small machine (gbrain #9662: a 50-minute unit lane on
 4 CPUs), so preflight never starts it on its own, whatever the reason (GST-3019;
 a full preflight did until GST-3277).
@@ -1958,7 +1967,10 @@ fix before the next workflow, as for any `behind=` of 1 or more.
 **Meaning.** `bin/gstack-upgrade` moves a checkout only by fast-forward to the
 tip of its remote default branch. It refused before changing anything: the
 directory is not a gstack checkout, HEAD is detached or on another branch (a
-pin), a tracked file is modified, a local commit is not on the remote branch,
+pin), a tracked file is modified (the root `SKILL.md` that setup renders for
+`disabled_skills` or `plan_mode_preamble off` doesn't count while its bytes
+match a fresh render for your current settings), a local commit is not on the
+remote branch,
 the incoming release's Bun floor is above the Bun on PATH, or another updater
 holds `<state root>/.setup-lock`. It never stashes, resets or discards.
 A `tracked-by-project` or `version-reverted` cause has its own section:
@@ -2266,8 +2278,15 @@ holds an open /ship run, and for `lane-exception` a `--files` list that is
 empty or holds whitespace. `add` refuses a `ruled_note` or
 `test_lane_exception` scope ([ruled notes](ship-policy.md#ruled-notes),
 [test-lane exceptions](ship-policy.md#test-lane-exceptions)).
+`rule` and `round-grant` refuse an `--owner-ref` that is not
+`<thread code>:<message id or timestamp>`, where the thread code looks like
+`GSTA-36` (an uppercase letter, then uppercase letters or digits, a dash and a
+number from 1), and an `--owner-ref` given without `--words` (for `rule`, also
+without `--by`). Each of these checks prints its own line, and the shape
+refusal never repeats the rejected ref.
 
-**Fix.** Rerun with every required flag inside the caps the line names. A
+**Fix.** Rerun the same command with the flag the line names, inside its caps
+(`gstack-approvals --help` lists each command's flags). A
 ruling or a test-lane exception is the owner's: record it from the owner's
 session, outside the lane's /ship run.
 
@@ -2292,10 +2311,12 @@ ruling after the run stops.
 uses). The line names the field and the detector rule, never the matched text. Exit 3.
 Nothing was written, locally or to the Drive mirror. `import --autoplan` skips a
 `pii.phone.e164` or `pii.cc` finding that starts inside the autoplan run id's
-14-digit stamp, or the thread-code digits right before it, where import places
+time stamp, or the thread-code digits right before it, where import places
 the id (the ask's `autoplan run <id>` and the source's `autoplan:<id>@`), when
 the id has the minted shape `<name>-<14 digits>` (GST-2047; since GST-3015 the
-name ends in six random letters); a phone number in
+name ends in six random letters) or the shape interactive /autoplan minted
+before #4402, `<branch>-YYYYMMDD-HHMMSS` with a real calendar date and time;
+a phone number in
 the rest of the directory name, the same id anywhere else, and every other
 finding in the row still refuse.
 Likewise a `pii.phone.e164` finding that starts inside the `stop=` run id of a
@@ -2418,8 +2439,10 @@ under `## Approvals`. A PR whose only changes are changelog fragments needs no l
 
 **Meaning.** `Plan: approved: <token>` names no approval row on this machine. A run id must
 match a row source `autoplan:<id>@gate_rev=<n>` in any branch's file of the repository's
-approval store (the state root plus every Drive mirror); a row id must exist and be a plan
-approval, not a `ruled_note`, `review_loop_grant` or `test_lane_exception` row. A public
+approval store (the state root plus every Drive mirror); a run folder path resolves to the
+run id in its `run.json`, else, for an interactive /autoplan folder with no `run.json`, to the
+one run its `decisions.jsonl` records (a folder holding several runs resolves to none, so cite
+the run id instead); a row id must exist and be a plan approval, not a `ruled_note`, `review_loop_grant` or `test_lane_exception` row. A public
 repo's `Plan: approved (record r-<id>)` must hash from a row id this machine can read; when it
 is the redacted Approvals block's own id (a hash of a whole record), the message says so.
 
@@ -2477,12 +2500,12 @@ whose Plan line differs from the PR body's current line.
 <a id="first-use-plan-unready"></a>
 ### `gstack-first-use start: ... (FIRST_USE_PLAN_UNREADY)`
 
-**Meaning.** `start` could not freeze the day-one actions: the plan has no `### Day one` table, the table is missing a column or has fewer than five rows, one of its first five rows has an empty cell, or one of them is still marked `assumed`. Exit 3; nothing is written. **Fix.** Give the plan the pinned table ([first-use-check.md](first-use-check.md#the-day-one-table)) and confirm every assumed row with the owner, then rerun `start`.
+**Meaning.** `start` could not freeze the steps: the plan has no `### Day one` table, the table is missing a column or has fewer than five rows, one of its first five rows has an empty cell, is still marked `assumed` or cites none of the owner's quotes (`owner words <n>`), or the plan has no `### Owner's words` section, or a quote there has no time or no line (`does it` or `choice`). Exit 3; nothing is written. **Fix.** Quote the owner's messages that state the job and cite them from the table ([first-use-check.md](first-use-check.md#the-owners-words-and-the-day-one-table)); a row the owner confirmed at the gate cites his answer, added to Owner's words. Then rerun `start`.
 
 <a id="first-use-play-spec-incomplete"></a>
 ### `gstack-first-use start: ... (FIRST_USE_PLAY_SPEC_INCOMPLETE)`
 
-**Meaning.** The play spec JSON misses one of the ten parts every ask to play or try a build carries (links, device and setup, what it is, how to start, controls, how long, what we want to learn, how to report back, known quirks, reply word). The line names each missing part and field. Exit 3. **Fix.** Fill them in ([first-use-check.md](first-use-check.md#play-spec)); "none" is a fine value for known quirks.
+**Meaning.** The play spec JSON misses one of the ten parts every ask to play or try a build carries (links, device and setup with its `target`, what it is, how to start with its numbered `steps`, controls, how long, what we want to learn, how to report back, known quirks, reply word), or a step writes on the owner's real setup with no `approved_write` naming his approval. The line names each missing part and field. Exit 3. **Fix.** Fill them in ([first-use-check.md](first-use-check.md#play-spec)); "none" is a fine value for known quirks and for a step's writes. Run a step that writes on a realistic copy, or get the owner's lettered approval for that write first.
 
 <a id="first-use-same-family"></a>
 ### `gstack-first-use start|record|predict: ... (FIRST_USE_SAME_FAMILY)`
@@ -2497,12 +2520,12 @@ whose Plan line differs from the PR body's current line.
 <a id="first-use-record-invalid"></a>
 ### `gstack-first-use: ... (FIRST_USE_RECORD_INVALID)`
 
-**Meaning.** A value or file is invalid: a bad `--commit`, `--action`, `--verdict` or score, an `--account` or `--device-class` that isn't the run's owner-equivalent audience, a run directory outside the record root, evidence that is not a screenshot or short video (or is empty, a link, or over 100 MB), an unreadable manifest, or a second prediction on a run. Exit 1. **Fix.** Correct the value. Run files are written once; to redo a check, start a new run.
+**Meaning.** A value or file is invalid: a bad `--commit`, `--platform`, `--step`, `--verdict`, `--line` or score, missing `--holding` or `--holding-defects`, an ios or android `start` without `--phone-build <id>` (the 26-character id of Capy's mobile build of `--commit`, which is what the cloud phone installs; a TestFlight or store number can't be installed there), an `--account`, `--target` or `--device-class` that isn't the run's owner-equivalent audience and target, a run directory outside the record root, evidence that is not a screenshot, short video or terminal capture (or is empty, a link, or over 100 MB), an unreadable manifest, a schema-1 run from before the try-it steps were checked, an ios or android run started before `--phone-build` existed, or a second prediction on a run. Exit 1. **Fix.** Correct the value. Run files are written once; to redo a check, or to continue from a schema-1 run or an older phone run, start a new run (with `--phone-build` for a phone).
 
 <a id="first-use-refused"></a>
 ### `gstack-first-use check|message: ... (FIRST_USE_REFUSED)`
 
-**Meaning.** The build has not cleared its first-use check, so `message` prints no "try this build" text and `check` prints no `FIRST_USE: pass` line. The detail lists every reason: `build_mismatch`, `source_changed`, `source_missing`, `action_<n>_not_played`, `action_<n>_failed`, `action_<n>_evidence_stale`, `link_unchecked`, `link_down`, `link_stale` (over 15 minutes old), `no_predicted_score`, `record_unreadable`. Exit 3. **Fix.** Fix the build and replay failed actions, rerun `links` right before sending, or start a new run for a new build or changed day-one rows.
+**Meaning.** The build has not cleared its first-use check, so `message` prints no try-it message and `check` prints no `FIRST_USE: pass` line. The detail lists every reason: `build_mismatch`, `source_changed` (the day-one rows or the owner's quotes changed), `source_missing`, `try_text_changed`, `step_<n>_not_played`, `step_<n>_broken`, `step_<n>_wrong`, `step_<n>_needs_lookup` (the step asks the owner for something an agent could look up or do), `step_<n>_thin` (only for a day-one action, which comes from the owner's words), `step_<n>_evidence_stale`, `link_unchecked`, `link_down`, `link_stale` (over 15 minutes old), `no_predicted_score`, `record_unreadable`. Exit 3. **Fix.** Fix the build or the step and replay it, rerun `links` right before sending, or start a new run for a new build, changed day-one rows or changed quotes.
 
 ## /ship token budget and fresh-context handoffs (gstack-ship-budget)
 
@@ -3321,6 +3344,18 @@ exact tokens it finds in these positions:
   `1234567-1794900000-0a1b2c3d`), and the 12-hex shas in the `pregate` value
   (`@<tree> (<n> checks, current for <head>)`) and the `requires_remote`
   values (`heads=`, `tree=`) (#4480);
+- in a closed `gstack-receipt-runs` block (the earlier /ship runs listed
+  under the receipt) that opens outside any other fenced code block, the
+  top-level `run` value of a line whose JSON matches its `JSON.stringify`
+  rendering byte for byte, with a 40-hex `head` and a `run` shaped like that
+  session id (#4725). A phone number in another field of the same line, a
+  `run` of any other shape, a session id under another key, a spaced or
+  reordered line, and a block inside another fence or left open still
+  report. About 1 in 10 session ids also passes the card-number checksum, so
+  this `run` value and the receipt's session-id `run` above also skip
+  `pii.cc`, but only when the whole card-shaped digit run lies inside the
+  value; a card number in another field, or as a `run` of any other shape,
+  still asks;
 - on a line outside any fenced code block that opens with `SHIP_RECEIPT:`,
   `CI_CARRY:`, `PREGATE:` or `READY_RECEIPT:` (bare, after `- `, `* ` or
   `> `, or after a backtick), the
@@ -5993,7 +6028,10 @@ is a quote wherever it appears whole, and from 8 words any 8 consecutive words
 are one, compared across punctuation, line breaks, JSON escapes, entities, HTML and
 Markdown markup, invisible format characters, contractions and case; replies
 of 1 or 2 words are not scanned for, and words the owner echoed from earlier
-text he didn't write are not his (the words a reply adds to an echo still are). See
+text he didn't write are not his (the words a reply adds to an echo still are).
+A plan quote of any length is also one wherever it appears directly inside quote
+marks, and so is its `leave out:` reason after `leave out:`, `leave it out for
+now:` or `reason to leave it out:`, in any case. See
 [the public copy](unattended.md#the-public-copy). `gstack-artifact validate --public <dir> --private
 <run>/run.json` reports each quote with file:line, and `gstack-autoplan export
 --public` runs that check on a staging copy and writes nothing when it fails.
@@ -6212,8 +6250,16 @@ pushed. [The push line](unattended.md#push-line).
 branch lacks (non-fast-forward), or the remote refused the update. Nothing
 was pushed.
 
-**Fix.** Fetch and inspect the remote, merge it under Step 3's conflict
-rules, run Steps 5-16 again, then rerun push. Never force-push.
+**Fix.** For a non-fast-forward, fetch and inspect the remote, merge it under
+Step 3's conflict rules, run Steps 5-16 again, then rerun push. When the remote
+refused the update, the `STOP:` line quotes its reason; a merge will not help,
+so change what it names instead. GitHub's `GH007` means a commit carries an
+email address your account keeps private: set `git config user.email` to your
+GitHub noreply address (shown at github.com/settings/emails), rewrite every
+commit that carries the private one
+(`git rebase origin/<base> --exec 'git commit --amend --reset-author --no-edit'`),
+repeat Step 16 and push. The quoted reason passes through the secret scanner
+first. Never force-push.
 
 <a id="push-git-failed"></a>
 ### `PUSH_GIT_FAILED`
@@ -6244,7 +6290,11 @@ green, a name in `changelog_fragments.required_checks` is missing or not green
 there, the PR's base is no longer the train's base, the stamp push failed while
 the branch still read the pin, `gh pr merge` refused, or the merge is not yet
 visible on main. `land` also uses it when a land lock push to origin failed and
-origin's lock ref could not be read to tell whether the push landed.
+origin's lock ref could not be read to tell whether the push landed, and when
+the `land.merged_ci` run on the merged tree could not be pushed, dispatched,
+finished within 45 minutes or proved ([land --pin](ship-policy.md#land-direct)).
+A timeout names the run it was waiting on, which is often just sitting in
+GitHub's macOS runner queue.
 
 **Fix.** Commit and push, wait for CI on that head, rerun
 `gstack-pregate run --allow-repo-commands` when the tree changed, then rerun
@@ -6255,7 +6305,12 @@ trial-merge fetch timeout, fetch the named refs by hand
 (`git fetch origin <ref>`) or raise `GSTACK_TRIAL_FETCH_TIMEOUT_MS`, then
 rerun ready. For an
 unreadable land lock, rerun the same `land` command once origin answers; it
-resumes its own lock.
+resumes its own lock. For a `land.merged_ci` timeout, rerun the same `land`
+command whenever you like and don't cancel the named run: while `origin/main`
+hasn't moved, the merged tree is the same, so land waits on that run for up to
+45 more minutes, or lands at once when it has already passed, instead of
+dispatching a new run that waits in the same queue. Once main moves, the merged
+tree changes and land dispatches a run for the new one.
 
 <a id="queue-base-unfetched"></a>
 ### `QUEUE_BASE_UNFETCHED`
@@ -6577,7 +6632,10 @@ added) before any git command in that checkout, then release the lock without
 running the checks with `gstack-ship-queue land --pr <n> --pin <sha>` (no
 `--allow-repo-commands`), and find out why the PR's checks wrote there before it
 lands. For a failed command or a red CI run, read the output or the failed job;
-a flaky case gets one rerun of land, and a real failure goes back to the lane,
+a flaky case gets one rerun (for a failed command, rerun land; for a red
+`land.merged_ci` run, rerun that run with `gh run rerun <id>` and then land,
+which waits on its new attempt, because land reuses the newest run on the same
+merged tree and would otherwise find the same red run), and a real failure goes back to the lane,
 which merges `origin/main` into the branch, fixes it, pushes, waits for the
 required checks, runs /ship and `ready` at the new head, and sends a new READY.
 
@@ -7831,30 +7889,33 @@ landed on the base, a stamp on the branch's own rows in a stamp file it also
 changed as product (every changed line at a branch-added position, the mode
 unchanged, the base not touching the file), a stamp file the branch changes by
 no more than a stamp against each head's base (a changelog-fragment conversion
-that puts `package.json` back at the base's content), or base context next to unchanged
-hunks after a clean scoped review ([`RECEIPT_CARRY_SCOPED_REVIEW`](#receipt-carry-scoped-review)), which the
+that puts `package.json` back at the base's content), base context next to unchanged
+hunks, or hunks the base merge spliced after a clean scoped review ([`RECEIPT_CARRY_SCOPED_REVIEW`](#receipt-carry-scoped-review)), which the
 `carry` object in the carried receipt records with the product patch-id and
 the range-diff evidence ([unattended.md](unattended.md#the-terminal-line)).
 
 <a id="receipt-carry-scoped-review"></a>
 ### `RECEIPT_CARRY_SCOPED_REVIEW`
 
-**Meaning.** Every product path the branch touches has the reviewed +/- lines
-in the same places, but the base edited context lines next to some of them, so
-the 3-line patches differ (GST-384: main reworded the line above the PR's
-hunk). A hunk whose added lines are unchanged but whose removed lines changed with
-the base (the base took `SAVE_VERSION := 83` under the branch's `:= 84`) doesn't
-count: the PR's own removed lines changed, so it's `RECEIPT_CARRY_PRODUCT_CHANGED`
-and a full review (GST-2706). The merge may have spliced the two, as in a JSON entry where the branch
-changed one key and the base the next, so the receipt does not carry silently.
+**Meaning.** The base replaced the very lines one of the branch's hunks
+replaces, and the merge kept both: each current line is the base's new line
+plus exactly the tokens the branch added, as when both sides appended an entry
+to one expected-value list (GST-2975). The branch's own lines are not the
+reviewed bytes, so the receipt does not carry silently. Base context that only
+moved next to the branch's unchanged hunks (GST-384: main reworded the line
+above the PR's hunk) no longer stops here: when the branch's +/- lines, file
+modes and symlink targets are the reviewed ones, the carry passes and CI on the
+merged head is the check (GST-3562). A hunk whose added lines are unchanged but
+whose removed lines changed with the base (the base took `SAVE_VERSION := 83`
+under the branch's `:= 84`) is `RECEIPT_CARRY_PRODUCT_CHANGED` and a full
+review (GST-2706).
 The refusal names the paths and a packet file with the hunks that differ and
 the base's own change. The same lines moved somewhere else are
 `RECEIPT_CARRY_PRODUCT_CHANGED`, not this code. A packet section with over
 200 of the branch's own +/- lines takes the full loop instead. Nothing else
 counts toward that limit: the context lines and headers of the branch's hunks,
 which a base merge can move (GST-2229), and the base's own change, already
-merged at base (GST-1226), are shown and not counted, so a large base edit next
-to the branch's hunks still gets the scoped read. A base change over 2,000 lines
+merged at base (GST-1226), are shown and not counted. A base change over 2,000 lines
 in one file counts in full again and takes the full loop.
 
 **Fix.** Dispatch one fix-check reviewer
@@ -7929,8 +7990,9 @@ request already had its two full review rounds (R51), counted across every head 
 round. A PR at the cap whose own code changed gets one read-only full review of its
 final head; this stop then means that review found a blocker or a gate-class edit.
 `/ship` Step 1 prints the count as `PR_REVIEW_HISTORY:` and passes it on from
-`PR_REVIEW_FLAGS:`. A fix below the blocking floor finishes with its notes
-listed instead of stopping.
+`PR_REVIEW_FLAGS:`. Below-floor findings that review leaves unfixed ship as
+notes; a fix applied after it, even below the floor, stops for the lane's
+Captain (GST-3562 A).
 
 **Fix.** The lane's Captain decides. Ship with the open notes listed, park, or,
 when a finding above the floor is open in this PR's own change, buy the stopped
@@ -8015,8 +8077,13 @@ The digest binds the abandon to the bytes you inspected.
 ### `GRANT_SPENT`
 
 **Meaning.** `gstack-ship-receipt claim` found another `/ship` run's grant
-record for this round grant in the PR body's runs block. A grant buys one round,
-and a voided run's claim still spends it. Within the run that claimed it, a
+record for this round grant in the PR body's runs block, or, for a fix-check
+grant, a counted fix-check in the review log that already read under it: a row
+carrying the grant, or one carrying no grant logged after the grant was recorded
+(a row stamped with another grant was that grant's read). The second case
+catches a fix-check that ran with no claim (an owner's `review_loop_grant` row or
+a round grant planned through `gstack-review-plan --grant`). A grant buys one
+round, and a voided run's claim still spends it. Within the run that claimed it, a
 fix-check row that doesn't count (`converged:false`, partial hunks) spends
 nothing: log a correct row in the same run instead of asking for a new grant
 ([review-policy.md](review-policy.md#one-grant-path)).

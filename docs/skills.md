@@ -746,7 +746,7 @@ If your project doesn't have a test framework, `/ship` sets one up — detects y
 
 ### Coverage audit
 
-Every `/ship` run builds a code path map from your diff, searches for corresponding tests, and produces an ASCII coverage diagram with quality stars. Gaps get tests auto-generated. Your PR body shows the coverage: `Tests: 42 → 47 (+5 new)`.
+Every `/ship` run builds a code path map from your diff, searches for corresponding tests, and produces an ASCII coverage diagram with quality stars. Gaps get tests auto-generated. Your PR body shows the coverage: `Tests: 42 → 47 (+5 new)`. An unattended `/ship` ([ship/DRIVER.md](../ship/DRIVER.md)) skips this coverage reader, and with no plan it also skips the plan-completion audit and the exploratory pass below (GST-3562).
 
 `/review` and `/ship` also run a bounded exploratory pass on changed behavior and nearby risks, even for a small diff without a plan or web server. Their existing approval and test rules govern any fixes or permanent tests; a blocked probe remains a coverage gap, not a passing QA result.
 
@@ -1212,16 +1212,15 @@ Claude: Submitting the signup form on staging.myapp.com creates a real
 
 You:    yes
 
-Claude: [aside repl: console hook → openTab → goto /signup → snapshot
+Claude: [gstack-aside-repl: console hook → openTab → goto /signup → snapshot
          → fill → click Submit → snapshot → screenshot → closeTab]
 
         DIFF_START … heading "Welcome — set up your workspace" … DIFF_END
         URL=https://staging.myapp.com/onboarding
         CONSOLE_ERRORS=[]
-        ASIDE_DIR=/Users/you/.aside/u/0/sessions/2026-09-05_7KtoAatMItBqZvoL
+        SAVED=.gstack/qa-reports/screenshots/issue-001-result.jpg bytes=48213
         GSTACK_STEP_OK
 
-        > cp "$ASIDE_DIR/issue-001-result.jpg" .gstack/qa-reports/screenshots/
         > Read .gstack/qa-reports/screenshots/issue-001-result.jpg
 
         Signup works. Redirected to onboarding. Now checking changed pages…
@@ -1426,7 +1425,7 @@ This is my **second opinion mode**.
 `/codex` brings OpenAI Codex CLI to review the same diff independently. It is available on every harness except Codex itself. External harnesses install it as `/gstack-codex`. Compare its findings with the native review to distinguish corroborated findings from issues only one reviewer caught.
 
 Without a role, gstack-owned Codex calls select a request-specific model, then
-`GSTACK_CODEX_MODEL`, then Codex native settings, falling back to `gpt-6-astra`.
+`GSTACK_CODEX_MODEL`, then Codex native settings, falling back to `gpt-6.2-astra`.
 This also applies to resumed consultations. Generated commands pass the selection
 through `-c model=...`, overriding the CLI's configured model for that call.
 Native review also sets `-c review_model=...` to that selection, overriding any

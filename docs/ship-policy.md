@@ -1329,6 +1329,12 @@ first (`pr`, `head`, `version`, `base`), then the evidence (`gate`, `ci`,
 `carry`, `no_stop`), validated
 against the `ship-receipt` schema (`gstack-artifact schema ship-receipt`) and
 read back by `gstack-ship-receipt read`, `result`, `carry` and the queue.
+Since GST-3562 (H), write and the queue's binding check need none of the
+`docs`, `review_loop`, `issues` or budget records to bind a receipt at its head;
+of the old records only the targeted reader's (`--review-targeted`) is still
+required, when Step 9's plan named a targeted class. Keep passing
+`--review-loop`: the next /ship run counts the PR's earlier rounds from it
+(`gstack-ship-receipt history`). A receipt that still carries the old records binds.
 
 **`version`.** The version source at HEAD: the path `.gstack/version-path`
 pins, else `VERSION`, else `package.json#version`. A repository with none of
@@ -1403,7 +1409,8 @@ checked-out HEAD, when the receipt records `gstack_version` without
 `class` one of the four no-stop defaults. /ship passes the branch's
 `gstack-no-stop` ledger here ([review-policy.md#no-stop](review-policy.md#no-stop)).
 
-**`review_loop_exception`.** The owner's acceptance of a stop after a
+**`review_loop_exception`.** Deprecated with fix-check grants (GST-3562 A; write
+still takes one for a stop before it, and the next release removes it). The owner's acceptance of a stop after a
 fix-check edit under frozen scope (#3559), from `write --review-loop-exception
 <json|@file>`: `{ accepted_by, date, via, reason, fix_check: { head, findings[, files] } }`.
 It needs `--review-loop` with `fix_checks` of 1 or more, a `fix_check.head`
@@ -1801,15 +1808,17 @@ construction:
    pass. `NO FINDINGS` is the expected reviewer result for a clean range, never a
    failed review.
 3. **Two rounds is the cap** (R51), stepped by the
-   [transition table](review-policy.md#transitions); a full pass, a
-   [scoped pass](review-policy.md#scoped-pass) and a fix-check each count as a round. A pass that applied no edits
+   [transition table](review-policy.md#transitions); a full pass counts as a
+   round, and /ship plans neither a fix-check nor a [scoped pass](review-policy.md#scoped-pass): any code change
+   after round 1 gets a full round 2, with no exception (GST-3562 A and part 3). A pass that applied no edits
    continues to Step 10: the loop ships with its deferred and noted items named in
    the PR body. A blocking finding still open after the last allowed step stops
-   the run and names the finding (path, severity, problem) for the owner instead
-   of a third round. A fix applied in the last allowed round gets one read-only
+   the run and names the finding (path, severity, problem) for the lane's Captain
+   instead of a third round: the PR ships with its open notes or the Captain rules. A fix applied in the last allowed round gets one read-only
    full review of the final head with no fix round (GST-3562 A); a fix after it
-   stops for the owner. A grant no longer buys a fix-check at the cap; one
-   answering the stop after a round-2 fix-check still does, until a later release.
+   stops for the Captain. Fix-check and round grants are deprecated: one recorded
+   before GST-3562 still answers its stop for one release, and the next release
+   removes them.
 
 <a id="what-ends-a-run"></a>
 **What ends a /ship run (GST-3260).** Preflight opens the run in the checkout's
@@ -1917,6 +1926,47 @@ release metadata and gate paths stay covered. The reason then names the reviewed
 base to save with the reviewed tree for finish's `--reviewed-base`.
 An own edit, a conflict resolution, an edit inside a merge, base context moved
 beside the branch's hunks or an uncommitted change reads `STALE` and says which.
+
+<a id="ruled-edits"></a>
+**Ruled edits after the final review (GST-3775).** An edit after the read-only
+final review stops finish (`behavior, tests or build inputs changed since review`),
+and `gstack-review-plan --post-review` then stops for the owner: ship the edit as
+a ruled note, or keep it and run /ship again for one more read-only full review.
+The owner's "ship it with the note" is a ruling per edited path, with `edit:<path>`
+as the finding and the stop head as the head; the stop line prints the edited
+paths and the head:
+
+```bash
+gstack-approvals rule --finding 'edit:<path>' --head <stop head> --reason '<why it ships as a note>' \
+  --by '<the owner>' --words '<their exact words>' --owner-ref <thread code>:<message id>
+```
+
+The stop line prints one such command per edited path, with each `edit:<path>`
+shell-quoted, so a path with quotes, `$`, `;` or backticks pastes as one argument.
+
+finish then routes a changed path as `RULED_EDIT: <path> (ruled at <head12> by <who>,
+approval <id>)` instead of stopping, when a ruling `edit:<path>` names HEAD or an
+ancestor of it, the path's entry in the tree finish routes (mode and bytes, untracked
+files included) equals that head's, and no commit after that head touches the path.
+Both trees must hold the path as one file under exactly the spelling finish routes:
+a path git cannot read (`git ls-tree` fails) or holds under another spelling (a
+filename that is not UTF-8 reaches finish with a replacement character), a path
+whose spelling holds a replacement character (U+FFFD) at all, since it may name
+another file than the one git changed, and a deleted path never match, so a
+ruling cannot clear them. A ruling that does not
+clear its path prints `RULED_EDIT_REFUSED: <path> (<why>; …)` and finish stops.
+A gate-class path, and a test the gate scan promotes to a behavior change, can be
+ruled like any other: the ruling is the owner's call on that exact edit. The stop
+line lists only the PR's own edits since the final review, never a path only a
+base merge moved, and names deletions apart, because a deletion cannot be ruled.
+One ruling never covers another path, and a path edited again after its ruling
+stops finish again, even when a later commit restores the ruled bytes. A path with
+whitespace cannot be ruled, so an edit there keeps the fix and runs /ship again.
+The ruling clears only the review stop: a changed file the documentation audit
+hashed still needs the stage 3 recovery finish's stop names. The ruling is an ordinary
+ruled note, so it prints as `RULED_NOTE:`, marked `(no RULED_EDIT at this head; not
+applied)` when it cleared no path, the receipt records it and the PR body lists its
+`Ruled note:` line.
 
 <a id="security-findings-stay-private"></a>
 **Security findings stay private (GST-3076).** A PR body keeps every earlier
@@ -2216,15 +2266,17 @@ that doesn't carry each of those lines word for word.
 
 **When the route still says behavior at the round cap.** `finish`'s behavior
 STOP tells the lane to plan the inserted Step 9 with `gstack-review-plan
---post-review` (plus `--pass`, `--last` and `--fix-checks` as the loop left
+--post-review` (plus `--pass` and `--last` as the loop left
 them). Edits after the review bound plan as a fix to a gate-class path, never
 as a note. The exception is a range after the last fix-check whose edits are
 only release stamps and docs (`docsChangeSince`): it plans `NEXT: done`, or
 `NEXT: targeted` for a docs claim on a targeted-class diff, with no grant
 ([review-policy.md](review-policy.md#transitions), GST-1702). Below the round cap that's a pass on the range (a fix-check under
 the lean panel before GST-3562; a full pass on the range since). At the cap it gets
-one read-only full review of the whole PR diff (GST-3562 A), never `done`, and a
-grant buys no fix-check there. When the last step was a
+one read-only full review of the whole PR diff (GST-3562 A), never `done`; any
+other edit after review costs the next round. The rest of this paragraph and the
+chain below serve only grants recorded before GST-3562 (deprecated, removed next
+release). When the last step was a
 fix-check, pass `--range-base` at that fix-check's commit: a new grant at a
 stop head after it plans the next link of the chain below (GST-1676), and the
 last link's own grant is refused. So `finish` never asks for a step the
@@ -2507,7 +2559,7 @@ A changed product path, or a product patch-id that differs, is
 base context next to the branch's unchanged hunks, which carries with no
 reader (GST-3562), or a hunk the base merge spliced, which is
 [`RECEIPT_CARRY_SCOPED_REVIEW`](troubleshooting.md#receipt-carry-scoped-review)
-until one fix-check reviewer clears the packet; a working tree with uncommitted
+until one scoped reader clears the packet; a working tree with uncommitted
 changes is [`RECEIPT_CARRY_REFUSED`](troubleshooting.md#receipt-carry-refused).
 A `RECEIPT_CARRY_PRODUCT_CHANGED` on linear history against the reviewed base
 whose range-diff, plus the diff of the changed product paths, is at most 400
@@ -2577,7 +2629,7 @@ review loop or Step 14.5's docs audit for a carried receipt:
    carry` is eligibility only; a refusal continues the full ship, except
    `RECEIPT_CARRY_SCOPED_REVIEW`, for which `gstack-ship-preflight` prints
    `NEXT: carry route`: fix what the base merge broke, commit and push, run carry
-   without `--dry-run` to write the packet, have one fix-check reviewer read it,
+   without `--dry-run` to write the packet, have one scoped reader read it (without asking; not a review round),
    then carry with `--scoped-review <record.json>` and `--pregate`. A blocking
    finding continues the full ship.
 2. Fix what the base merge broke (the CHANGELOG, the size caps the policy

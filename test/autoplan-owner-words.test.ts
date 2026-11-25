@@ -154,6 +154,25 @@ describe('redactOwnerWords', () => {
     for (const kept of ['deferred: no time to spare', 'eng closed accepted-with-findings at round 1 (no time left): 0 open', '(no time; by agent:x)', 'we had no time to spare']) expect(redactOwnerWords(kept, o).text).toBe(kept);
   });
 
+  test('a short plan quote in quote marks is redacted however the padding or the text is encoded, and a bare mention stays (GST-3646)', () => {
+    const o = ownerIndex([], { quoted: ['water alerts'] });
+    const cases: Array<[string, string]> = [
+      ['He said "water alerts".', `He said "${MARK}".`],
+      ['He said " water alerts ".', `He said " ${MARK} ".`],
+      ['He said "&nbsp;water alerts&nbsp;".', `He said "&nbsp;${MARK}&nbsp;".`],
+      ['He said "\u200bwater alerts\u200b".', `He said "\u200b${MARK}\u200b".`],
+      ['He said &quot;water alerts&quot;.', `He said &quot;${MARK}&quot;.`],
+      ['He said “water&#32;alerts”.', `He said “${MARK}”.`],
+      ['He said “water&nbsp;alerts”.', `He said “${MARK}”.`],
+      ['He said "water  alerts".', `He said "${MARK}".`],
+      ['{"title":"He said \\"water\\u00a0alerts\\""}', `{"title":"He said \\"${MARK}\\""}`],
+      ['{"title":"He said \\"water alerts\\""}', `{"title":"He said \\"${MARK}\\""}`],
+      ['Pick "panel" water alerts "toggle" here', `Pick "panel" ${MARK} "toggle" here`],
+    ];
+    expect(cases.filter(([text, want]) => redactOwnerWords(text, o).text !== want).map(([text]) => text)).toEqual([]);
+    for (const kept of ['Turn on water alerts today.', 'He said "water alerts are noisy".']) expect(redactOwnerWords(kept, o).text).toBe(kept);
+  });
+
   test('every template that renders a deferral reason has a placement (add one to DEFERRAL_RENDERINGS with any new template)', () => {
     const root = path.resolve(import.meta.dir, '..');
     const count = Object.fromEntries(fs.readdirSync(path.join(root, 'lib')).filter(f => f.startsWith('autoplan-') && f.endsWith('.ts'))
@@ -163,7 +182,7 @@ describe('redactOwnerWords', () => {
 });
 
 describe('ownerWords over a run directory', () => {
-  test("a leftover ruled-out line is read as part of the quote, as before lines existed, so export and validate still redact the owner's ruling", () => {
+  test("a plan's ruled-out line indexes the owner's ruling as well as the quote, so export and validate both redact it", () => {
     const out = fs.mkdtempSync(path.join(os.tmpdir(), 'owner-ruling-'));
     const ruling = 'leave my calendar alone, I mean it, no exceptions';
     fs.writeFileSync(path.join(out, 'plan-source.md'), `# Plan\n\n## Implementation plan\n\n### Owner's words\n\n- The owner, 2026-11-12 09:00Z: "never touch my calendar or my reminders" → ruled out 2026-11-12: "${ruling}"\n\n## Review record\n`);
@@ -171,7 +190,7 @@ describe('ownerWords over a run directory', () => {
     const r = redactOwnerWords(`The reviewer repeats it: "${ruling}".`, owner);
     expect(r.text).toContain(MARK);
     expect(r.text).not.toContain('no exceptions');
-    expect(redactOwnerWords(`He said: "never touch my calendar or my reminders" → ruled out 2026-11-12: "${ruling}"`, owner).text).not.toContain('calendar');
+    expect(redactOwnerWords('He said never touch my calendar or my reminders today.', owner).text).toContain(MARK);
     fs.rmSync(out, { recursive: true, force: true });
   });
 });

@@ -14,8 +14,8 @@ import { QUESTIONS } from '../scripts/question-registry';
 import { generateUpgradeCheck } from '../scripts/resolvers/preamble/generate-upgrade-check';
 
 const ROOT = path.resolve(import.meta.dir, '..');
-const CORE = ['/office-hours', '/review', '/qa', '/ship'];
-const NON_CORE_SAMPLE = ['/cso', '/plan-ceo-review', '/design-review', '/retro'];
+const CORE = ['/office-hours', '/review', '/qa', '/gstack-ship'];
+const NON_CORE_SAMPLE = ['/benchmark', '/plan-ceo-review', '/design-review', '/retro'];
 // The one place the core block may name non-core skills: the rule that says to name them for the user to type.
 const TYPE_IT_RULE = 'under `core`, name `/browse` for the user to type instead of\ninvoking it.';
 
@@ -53,7 +53,7 @@ describe('proactive core set: every skill preamble', () => {
 
   test('the steady-state rule names the four core skills under core, scopes the setting to unasked suggestions, carves out only named skills, and keeps the marker the order test reads', () => {
     expect(line).toMatch(/^If `PROACTIVE` is `off`/);
-    expect(line).toContain('`core`: only /office-hours, /review, /qa, /ship');
+    expect(line).toContain('`core`: only /office-hours, /review, /qa, /gstack-ship');
     expect(line).toContain('`all`: any');
     expect(line).toContain('suggest no skills unasked, nor ask');
     expect(line).toContain('Skills the user names or this one invokes run');
@@ -64,7 +64,7 @@ describe('proactive core set: every skill preamble', () => {
   test('a generated core skill and a generated non-core skill both carry it (it is the same preamble)', () => {
     for (const skill of ['review', 'retro']) {
       const out = fs.readFileSync(path.join(ROOT, skill, 'SKILL.md'), 'utf-8');
-      expect(out).toContain('`core`: only /office-hours, /review, /qa, /ship');
+      expect(out).toContain('`core`: only /office-hours, /review, /qa, /gstack-ship');
     }
   });
 });
@@ -85,7 +85,7 @@ describe('proactive core set: the one-time prompt and the registry', () => {
     expect(QUESTIONS['preamble-proactive-behavior'].options).toEqual(['core', 'all', 'off']);
   });
 
-  test('the first-run and first-loop tips name only core skills (negative control: no /spec or /cso tip; the off gating is proven by running the script in proactive-skill-start.test.ts)', () => {
+  test('the first-run and first-loop tips name only core skills (negative control: no /spec or /benchmark tip; the off gating is proven by running the script in proactive-skill-start.test.ts)', () => {
     const tips = skillStart.slice(skillStart.indexOf('if [ "$_ACTIVATED" = "no" ]; then'), skillStart.indexOf('# Routing injection'));
     for (const skill of NON_CORE_SAMPLE.concat(['/spec', '/plan-eng-review'])) expect(tips).not.toContain(skill);
     for (const skill of CORE) expect(tips).toContain(skill);
@@ -174,7 +174,7 @@ describe('proactive core set: core skills carry their trigger phrases (#2118)', 
   const skillDirs = fs.readdirSync(ROOT).filter(dir => fs.existsSync(path.join(ROOT, dir, 'SKILL.md.tmpl')) && fs.existsSync(path.join(ROOT, dir, 'SKILL.md')));
   const catalog = Object.fromEntries(skillDirs.map(dir => [dir, description(fs.readFileSync(path.join(ROOT, dir, 'SKILL.md'), 'utf-8'))]));
 
-  test.each(CORE.map(s => s.slice(1)))('%s: every trigger phrase is in its full description, and one is in its catalog one-liner that no other one-liner carries', (skill) => {
+  test.each(CORE.map(s => s.slice(1).replace(/^gstack-/, '')))('%s: every trigger phrase is in its full description, and one is in its catalog one-liner that no other one-liner carries', (skill) => {
     const tmpl = fs.readFileSync(path.join(ROOT, skill, 'SKILL.md.tmpl'), 'utf-8');
     const triggers = frontmatterList(tmpl, 'triggers').map(norm);
     expect(triggers.length).toBeGreaterThan(0);

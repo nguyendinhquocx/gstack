@@ -74,7 +74,7 @@ Inventory of every setup side effect, by phase (line numbers are approximate):
 
 | Phase | Writes | Scope |
 |---|---|---|
-| Build | `browse/dist`, `design/dist`, `make-pdf/dist`, `bin/gstack-cso-*` in the source checkout | source |
+| Build | `browse/dist`, `design/dist`, `make-pdf/dist` in the source checkout | source |
 | Hosts record | `.gstack-installed-hosts` in the source checkout: every host setup installed from it, additive (#1694) | source |
 | Generation | renders for the recorded hosts only (`.agents/`, `.kiro/`, `.factory/`, `.opencode/`, `.cursor/`, `.copilot/`, `.agy/`, `.gemini-cli/`) in the source checkout; `gstack-patch-names` rewrites Claude `name:` fields in place | source |
 | Render prune | renders of hosts the record does not name: links into the checkout removed, generated files moved to `$GSTACK_STATE_ROOT/backups/host-renders/<ts>-<id>/`, other files kept | source / state root |
@@ -508,7 +508,7 @@ Key fields:
 | `frontmatter.mode` | `allowlist` (keep only listed) or `denylist` (strip listed) |
 | `frontmatter.descriptionLimit` | Max chars, `null` for no limit |
 | `frontmatter.descriptionLimitBehavior` | `error` (fail build), `truncate`, `warn` |
-| `frontmatter.conditionalFields` | Add fields based on template values, in allowlist and denylist mode. Two template flags map to `disable-model-invocation: true`: `sensitive` (broad: /ship, /land-and-deploy, /modernize and the safety skills; Copilot and Factory) and `manual_only` (narrow: /land-and-deploy and /modernize only; Claude Code and Cursor, where "ship it" must still start /ship). A host whose docs honor `disable-model-invocation` picks one |
+| `frontmatter.conditionalFields` | Add fields based on template values, in allowlist and denylist mode. Two template flags map to `disable-model-invocation: true`: `sensitive` (broad: /gstack-ship, /land-and-deploy, /modernize and the safety skills; Copilot and Factory) and `manual_only` (narrow: /land-and-deploy and /modernize only; Claude Code and Cursor, where "ship it" must still start /gstack-ship). A host whose docs honor `disable-model-invocation` picks one |
 | `frontmatter.renameFields` | Rename template fields (e.g., voice-triggers → triggers) |
 | `generation.generateMetadata` | Emit `agents/openai.yaml` beside each skill (Codex only today; the format is hardcoded in `gen-skill-docs.ts`). Its `default_prompt` comes from the template's `codex_default_prompt:` frontmatter key, else `Use <name> for this task.` |
 | `pathRewrites` | Literal replaceAll on content. Order matters. Replaces the derived trio. |

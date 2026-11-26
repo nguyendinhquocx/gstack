@@ -102,11 +102,11 @@ Not every workflow writes this line or a run directory today:
   record), not a run directory.
 - **A refused launch.** Any skill whose install check refuses it at startup
   prints `GSTACK_RESULT: skill=<name> status=refused run=-` and stops.
-- **`/ship`** ends with `gstack-ship-receipt result --pr <n>` (or `--body
+- **`/gstack-ship`** ends with `gstack-ship-receipt result --pr <n>` (or `--body
   .gstack/tmp/ship-receipt.md` after the handoff section), which binds the
   receipt to the branch head, writes the run record and prints
   `GSTACK_RESULT: skill=ship status=complete head=<sha> run=<dir>`. That line and that
-  record are the machine-readable READY evidence; [What /ship leaves for a
+  record are the machine-readable READY evidence; [What /gstack-ship leaves for a
   parent](#ship-evidence) below is the whole contract (the refused and
   incomplete lines, the one publication an unattended run may make, the
   `review_loop` counters, the outside voice on Capy and the `CARRY:` lines).
@@ -116,10 +116,9 @@ Not every workflow writes this line or a run directory today:
   writes a run directory or prints the line, so a parent should not wait for
   either. `/eval-plan` asks for a `gate_pending` line at its spend gate, but no
   helper writes its `gate.json` yet (`gstack-gate` renders and parses a gate
-  list; it does not create one). `/cso` skips the shared startup, so these
-  session rules do not reach it at all. Read each skill's own record instead:
+  list; it does not create one). Read each skill's own record instead:
   the review-log rows (`gstack-review-read`) for `/review` and the
-  `qa-report-*.md` file for `/qa`. For a `/ship` run from before the result
+  `qa-report-*.md` file for `/qa`. For a `/gstack-ship` run from before the result
   line, read the receipt instead: when the run did not push (an unattended run
   must not), read the receipt file in the child's checkout with
   `gstack-ship-receipt read --body .gstack/tmp/ship-receipt.md --json`;
@@ -135,15 +134,15 @@ in [troubleshooting.md](troubleshooting.md#unattended-runs-and-artifacts) with
 a `fix:` clause. Grep the code, not the prose.
 
 <a id="ship-evidence"></a>
-## What /ship leaves for a parent
+## What /gstack-ship leaves for a parent
 
 One section for everything a parent (a Captain, a crew thread, a merge queue)
-reads after an unattended `/ship`: the READY evidence, the review loop's
+reads after an unattended `/gstack-ship`: the READY evidence, the review loop's
 counters, the outside voice's record, and the carry across a base merge.
 
 ### The READY evidence: `gstack-ship-receipt result`
 
-`/ship` Step 22 runs `gstack-ship-receipt result --pr <n>` (or `--body
+`/gstack-ship` Step 22 runs `gstack-ship-receipt result --pr <n>` (or `--body
 .gstack/tmp/ship-receipt.md` after the handoff section). It binds the receipt
 in the PR body (or the handoff file) to HEAD, writes
 `<state root>/ship/runs/<utc>-<head12>/` and prints the terminal line:
@@ -156,7 +155,7 @@ The run directory holds `ship-receipt.md` (the block, copied) and
 `ship-run.json` with `head`, `pr`, `base`, `version` (`"none"` for a
 repository with no version source, [ship-policy.md](ship-policy.md#ship-receipt)),
 `queue_mode`, `session_kind`, `receipt` (the copied block's path) and
-`receipt_source`. It is a /ship record, not the `run` v1 manifest below, so
+`receipt_source`. It is a /gstack-ship record, not the `run` v1 manifest below, so
 read it directly; `gstack-artifact validate` does not apply. A parent's merge
 check is then mechanical: take `run=` from the last result line, read
 `ship-run.json`, compare its `head` to the PR head, and quote the
@@ -190,7 +189,7 @@ unpushed head is `QUEUE_RECEIPT_STALE` to the queue.
 
 Step 17's `gstack-ship-release push` (early or final) always ends with exactly
 one line saying whether the branch reached the remote, so a parent, a report or
-an outside probe can tell that `/ship` pushed without looking for a
+an outside probe can tell that `/gstack-ship` pushed without looking for a
 `git push` call:
 
 ```
@@ -227,7 +226,7 @@ findings` and the below-floor items under `## Review notes`. A pass that finds
 nothing is `NO FINDINGS` from every reviewer and a pass with no edits, which
 is the loop's exit, never a failed review ([review-policy.md](review-policy.md)).
 Three counters appear only when the run recorded them: `fix_checks` (fix-check
-rows, never passes), `dispatches` (reviewer dispatches by role) and
+rows from before GST-3562, never passes), `dispatches` (reviewer dispatches by role) and
 `est_input_tokens` (prompt plus diff bytes the dispatches read, / 4, a relative
 estimate and never a bill).
 
@@ -242,8 +241,8 @@ never on polling wakes, except a crew lane's warm wait under about 30 minutes
 
 ### Token caps and fresh-context handoffs
 
-A parent bounds a /ship run with `--token-cap <n>` (or `GSTACK_SHIP_TOKEN_CAP`).
-It is an admission cap: /ship meters usage, reserves every step and dispatch
+A parent bounds a /gstack-ship run with `--token-cap <n>` (or `GSTACK_SHIP_TOKEN_CAP`).
+It is an admission cap: /gstack-ship meters usage, reserves every step and dispatch
 batch before it starts, and stops `status=incomplete` with a `RECOVER:` line
 instead of starting work that would cross the cap. Long runs hand Steps 9–11.5
 and 12–22 to fresh-context children. The flow, the BUDGET line and the result
@@ -302,7 +301,7 @@ When the parent merges the base in or fixes a test after the receipt was
 written, it pushes that commit with `gstack-ship-release push --branch <branch-name> --early`
 (carry refuses an unpushed HEAD, `--dry-run` included), then runs
 `gstack-ship-receipt carry --pr <n> --base <base> --dry-run` instead of another
-/ship; on `CARRY: would carry` it commits and pushes any fix the same way, waits with
+/gstack-ship; on `CARRY: would carry` it commits and pushes any fix the same way, waits with
 `gstack-ci-carry wait --base <base>` (`CI_CARRY: none` is not a stop), runs `gstack-pregate --allow-repo-commands`
 at HEAD and reruns carry with `--pregate .gstack/tmp/pregate.json`, the order
 `gstack-ship-preflight`'s carry route prints. `CARRY: carried from <old> to <new> (<reason>)` plus the
@@ -318,7 +317,7 @@ clean record reruns carry with `--scoped-review <record.json>`
 ([troubleshooting](troubleshooting.md#receipt-carry-scoped-review)). `CARRY: refused (RECEIPT_CARRY_PRODUCT_CHANGED)`,
 `(RECEIPT_CARRY_TREE_MISMATCH)` or `(RECEIPT_CARRY_REFUSED)` with the refused
 result line means the product diff changed, or history was rewritten onto a
-tree no review saw, so /ship runs again;
+tree no review saw, so /gstack-ship runs again;
 `(RECEIPT_GIT_TOO_OLD)` means the machine's git predates 2.39 and cannot run
 `patch-id --verbatim` ([ship-policy.md](ship-policy.md#receipt-carry)).
 
@@ -412,9 +411,9 @@ owner's own words: nothing a person wrote leaves without their click (GST-1243).
 
 When a parent starts another agent to run a gstack skill, the child's prompt
 opens with the skill command typed the way a person types it, for example
-`/ship --continue <brief>`, and everything else comes after it. Claude Code
+`/gstack-ship --continue <brief>`, and everything else comes after it. Claude Code
 expands a skill only when the prompt starts with `/<skill>`. A prompt such as
-"Load gstack. … Run /ship …" reaches the model as plain text, and the model
+"Load gstack. … Run /gstack-ship …" reaches the model as plain text, and the model
 then has to decide on its own to load the skill. In gstack-evals#366, Opus 5.5
 found a skill from its description in 0 of 60 unattended sessions, while a
 typed command put the skill's text in front of it in 60 of 60.
@@ -427,7 +426,7 @@ typed command put the skill's text in front of it in 60 of 60.
 - **Hosts that don't expand a typed skill**, such as a Capy subagent, get the
   skill's SKILL.md path to read instead.
 
-`gstack-ship-budget launch` (`lib/ship-handoff.ts`), the token-capped /ship
+`gstack-ship-budget launch` (`lib/ship-handoff.ts`), the token-capped /gstack-ship
 child on Claude Code, follows this rule, and `test/ship-budget.test.ts`
 checks its prompt.
 
@@ -435,7 +434,7 @@ checks its prompt.
 
 1. **Decide whether the run finished.** For an `/autoplan` run directory,
    `gstack-artifact validate <dir>/run.json`
-   is the deterministic completion check (a `/ship` `run=` directory holds
+   is the deterministic completion check (a `/gstack-ship` `run=` directory holds
    `ship-run.json`, read directly as described above). It exits `0` and prints
    `ARTIFACT_VALID: run=<id> status=<status>` only when the manifest parses and
    matches its schema, every required phase and each reviewer voice has a
@@ -846,7 +845,7 @@ those changes. The capped phases' deltas are recorded `accepted` with
 `basis: applied owner-approved recommendations at the round cap`, the journal
 gets `unreviewed_at_cap`, and `revise` prints one `UNREVIEWED:` line naming
 the revision, the phases that never read it, the decisions and the owner's
-words, then `APPROVED:`. That line is an open note, as a finding /ship ships
+words, then `APPROVED:`. That line is an open note, as a finding /gstack-ship ships
 with after round two is: `gstack-autoplan rule --out <dir> --revision <k> --by
 <ruler> --reason "<why>" [--owner-ref <thread>:<message>]` records a Captain's
 or the owner's ruling on it (`unreviewed_ruled`; gstack cannot rule on its
@@ -1119,24 +1118,15 @@ decision or action, every evidence pointer resolves and shows what the row
 claims, and a fork or abandoned approach that shaped the result but is not
 logged gets a row. The audit corrects the log, never the story: no row is
 edited or removed, an invented or wrong row stays and a new row supersedes it
-with what actually happened. On a risk-class PR (the receipt's `review_depth`
-has class `gate` or a `risk` class: security, money, auth, secrets, user
-data), a reviewer on a different model family from the one that did the work
-(a Capy subagent on another family, or the outside voice) then reads the trail
-and the transcript and flags what the owner should look at: decisions with
-weak or missing evidence, verification claimed without proof, choices that
-look risky in hindsight, gaps a skim would miss. Self-review does not stand in
-for that read. Every other PR skips it: the run's own audit is the review. The
-run's final report ends with an `Attention` section that opens with `reviewed
-by <model>` (risk class) or `self-audited` (every other PR) on its own line
-and lists each flag against its rows; `No flags` is a valid body, a missing
-opening line is not. The reader's read is a trail row with phase `trail-read`
-whose decision names the reader (`gstack-decision-trail <file> trail-read
-"openai/gpt-6.2-sol (Subagent 4)" <why> <evidence> <flags>`).
-`gstack-ship-queue ready --trail <file>` prints the opening line from that row
-for a risk-class receipt, then that row's flags (`Flags (trail row <n>): …`, or
-`No flags (trail row <n>)`), or `MISSING: cross-family trail read` when the trail
-has none, and one `TRIAL_MERGES` line per open PR that shares a file, from
+with what actually happened. The run's final report ends with an `Attention`
+section listing what the owner should look at (decisions with weak or missing
+evidence, verification claimed without proof, choices that look risky in
+hindsight); `No flags` is a valid body. The cross-family read of the trail on
+risk-class PRs (`trail-read` rows, `ready --trail`, `MISSING: cross-family trail
+read`) was retired in GST-3562 part 4: it caught one finding in 17 reads, one the
+second-model reviewer had already raised. `gstack-ship-queue ready` opens the
+Attention section with the receipt's risk class and prints one `TRIAL_MERGES`
+line per open PR that shares a file, from
 `git merge-tree` at both heads. Heads this clone lacks come down in one
 `git fetch` (then one at a time if that fails) within
 `GSTACK_TRIAL_FETCH_TIMEOUT_MS` (default 60 s); ready prints a progress line
@@ -1167,13 +1157,13 @@ and `status: "pending"`, named in the handoff, never taken.
   a `/modernize` disposition names before it happens, never one the run
   decides on its own, on a branch the run created or was handed in its
   prompt, never the base. Rebasing a branch that already holds a receipt
-  costs a fresh /ship unless the receipt's tree carries; `git range-diff <old base>..<old head> <new base>..<new head>`
+  costs a fresh /gstack-ship unless the receipt's tree carries; `git range-diff <old base>..<old head> <new base>..<new head>`
   runs before the push and its output goes in the handoff. The push is
   `git push --force-with-lease=<branch>:<sha observed before the rebase> origin <branch>`:
   a bare `--force-with-lease` protects only against commits this clone never
   fetched, and a plain `--force` is never allowed. A rejected lease means the
   remote moved: fetch, read what landed, and start the disposition again.
-  `/ship` itself never rebases or force-pushes, and an unattended `/modernize`
+  `/gstack-ship` itself never rebases or force-pushes, and an unattended `/modernize`
   stops at its verdict; this route is for a run whose plan named the rebase
   before it started.
 - **Tests: the methods the repository's instructions name, without asking
@@ -1188,5 +1178,5 @@ and `status: "pending"`, named in the handoff, never taken.
   context to recheck, not evidence; the handoff says which claims were
   rechecked and which were not.
 
-`/ship`'s handoff section (`ship/sections/handoff.md`) points here, so a lane
+`/gstack-ship`'s handoff section (`ship/sections/handoff.md`) points here, so a lane
 reads the grant where it reports done.

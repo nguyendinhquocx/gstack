@@ -539,7 +539,7 @@ after its rerun binds RED and is never reused. Train runs take the same
 ### Ship measure
 
 **Measure-then-fix: diagnostic trials are not verdicts** (`scripts/ship-measure.ts`).
-When a paid case goes red during /ship, /ship measures that case alone before it
+When a paid case goes red during /gstack-ship, /gstack-ship measures that case alone before it
 reruns the full gate: classify the red line, measure, fix at the cause,
 re-measure, then run the gate once (`ship/sections/measure.md`). The repeated
 runs are **diagnostic measurement, not verdict retries**, so they fit the
@@ -626,7 +626,7 @@ state root and flake ledger and with `GSTACK_FREE_RETRY_FLAKY=0`, under a
 free random ports, as in the normal suite. `ship_rerun_backend=ubicloud` runs the
 reruns on one Ubicloud VM through `bun run test:ubicloud --diagnostic`, which
 also sets the flaky retry off. The seeded paid case `ship-measure-seeded-flake`
-(periodic, `behavior`) drives /ship through this loop against a stub eval
+(periodic, `behavior`) drives /gstack-ship through this loop against a stub eval
 command that fails trial slots 2, 5 and 9 until its list is sorted. The weekly
 [off-ship sweep](#ship-measure-sweep) measures main's flakiest gate cases with
 the same runner and bar.
@@ -956,7 +956,7 @@ latest gate census, and ranks every live, non-quarantined gate case with a
 failed trial or red verdict by its cost to the all-green probability
 Π(1 − p_i) (the shrunk red-verdict rate from `--reds`; ties go to the lower
 per-trial pass rate). It measures the top K (`ship_measure_sweep_cases`,
-default 5; `--k`) at their kind's N on the checked-out head with /ship's runner
+default 5; `--k`) at their kind's N on the checked-out head with /gstack-ship's runner
 and bar, in rank order. The report (`sweep-report.md` and `.json` under
 `.context/ship-measure/sweep-<time>/`, rewritten after every case) has one row
 per case (history rate, measured count, decision, estimated and actual cost,
@@ -979,7 +979,7 @@ reports first, uploads the report and captures as the `ship-measure-sweep`
 artifact, and writes the job summary. It holds `contents: read`, never pushes
 or opens a pull request, and runs one sweep at a time repository-wide
 (concurrency group `eval-sweep`, not cancelled) so two runs never spend the
-same weekly cap. Fixing is done by an agent from the report, through /ship's
+same weekly cap. Fixing is done by an agent from the report, through /gstack-ship's
 measure loop. Sweep trials are diagnostic like every ship-measure trial: they
 never become verdicts and never enter EVAL_POLICY pooling or series history.
 
@@ -1030,16 +1030,16 @@ checkout to it: tracked files, untracked files that are not ignored, and
 `scripts/ubicloud/setup-free-suite.sh`, which mirrors the `free-suite` CI job
 (same Bun pin, Playwright Chromium with its setuid sandbox helper, Xvfb,
 poppler, emoji fonts, zsh for the bash+zsh portability arms (#2669), generated
-host outputs, gate binaries, and the CSO helper), and runs `xvfb-run -a bun run test:free` with `GSTACK_EXPECT_BINARIES=1`
+host outputs and gate binaries), and runs `xvfb-run -a bun run test:free` with `GSTACK_EXPECT_BINARIES=1`
 and `GSTACK_FREE_RETRY_FLAKY=1`. Shard logs are copied to
 `.context/ubicloud/<timestamp>/`, and the VM is destroyed on every exit path.
-The exit status is the suite's. `--diagnostic` instead runs /ship's free-shard
+The exit status is the suite's. `--diagnostic` instead runs /gstack-ship's free-shard
 measurement (`scripts/ship-measure.ts free`, see [ship-measure](#ship-measure))
 with `GSTACK_FREE_RETRY_FLAKY=0`.
 
 A stock Ubuntu 24.04 VM differs from a GitHub-hosted runner in three ways that
 the scripts correct: the login umask is `002` (group-writable directories fail
-the CSO private-state checks), AppArmor blocks the unprivileged user
+the permission checks in the code under test), AppArmor blocks the unprivileged user
 namespaces Chromium's sandbox needs, and `python3-venv` is absent (required by
 the Python runner tests).
 
@@ -1769,7 +1769,7 @@ only, <workflow>)":
 | `free-tests.yml` | `free-suite`, `macos-named-regressions` |
 | `windows-smoke.yml` | `windows-smoke` |
 | `windows-scoped-tests.yml` | `windows-scoped-shard` |
-| `windows-setup-e2e.yml` | `windows-setup`, `windows-setup-recovery`, `windows-setup-cso`, `held-install-journey`, `held-install-trial`, `held-install-later-release` |
+| `windows-setup-e2e.yml` | `windows-setup`, `windows-setup-recovery`, `held-install-journey`, `held-install-trial`, `held-install-later-release` |
 | `quality-gate.yml` | `quality` |
 | `evals.yml` | `build-image`, `eval-slices` |
 
@@ -2129,7 +2129,8 @@ refusal from `bin/gstack-eval-plan` (logic in `lib/eval-plan-checks.ts` and
 |---|---|---|
 | `## Decisions`: one `if <result>: <what we do>` line per possible result, at least two, with different actions | `prereg --check`, before anything is spent | `PREREG_INCOMPLETE` |
 | `## Scoring`: `judge: none`, or a judge model from another family than every arm with `labels:` (100 or more; 40 for a plan frozen before 2026-11-22) and `agreement:` (kappa 0.6 or more); with two or more arms, `paired: yes`, `interval: 95%` and `mdd:` stated before the run | `prereg --check` | `PREREG_INCOMPLETE` |
-| The judge's Cohen's kappa against `{"id", "human", "judge"}` hand labels, at the preregistered count and bar | `judge --check` before the approval ask; `results --check --labels` before any number goes out | `EVAL_JUDGE_UNCHECKED` |
+| The judge's Cohen's kappa against `{"id", "human", "judge"}` hand labels, at the preregistered count and bar; with a `labels-by:` model (R126, code judges only), its `--anchors` answers meet `anchor-pass:` first | `judge --check` before the approval ask; `results --check --labels` before any number goes out | `EVAL_JUDGE_UNCHECKED` |
+| With a `labels-by:` model, the results file says `judge checked against <model>, a third model, not against people` | `results --check` | `EVAL_REPORT_THIRD_MODEL_UNNAMED` |
 | A zero in any results table comes from a column named after a `## Diagnostics` counter whose synthetic fixture plants at least one case (expected 1 or more) | `results --check` | `EVAL_REPORT_UNPLANTED_ZERO` |
 | A results table with a failures column also has an `answer-only` column: failures by the grader's own rule on the final answer | `results --check` | `EVAL_REPORT_NO_ANSWER_ONLY` |
 
@@ -2265,6 +2266,38 @@ or after 2026-11-22, or with no `frozen:` line, checks its model judge against a
 least 100 hand-labelled outputs before the judge's numbers count. The kappa bar
 stays 0.6. A plan frozen earlier keeps 40. `prereg --check`, `judge --check` and
 `results --check` all read the bar from the plan's `frozen:` date.
+
+**Third-model labels for code judges (R126).** Garry, 2026-11-25: "Nah let's
+just use Gemini neon as another model here and don't use humans". A judge that
+grades code may be checked against labels a third-family model made instead of
+people's, at the same count and kappa bar. `## Scoring` then says:
+
+- `labels-by: google/gemini-4-neon`: the labeller, as `<provider>/<model>`,
+  from a family neither the judge nor any arm shares. Gemini 4 Neon is the
+  labeller unless Gemini is the judge or an arm (then another third family,
+  such as `x-ai/grok-4.7`), or a `labeller-fallback:` line names the run
+  where Neon missed its anchor pass line.
+- `label-kind: code`: the judge grades code. Labels for anything else,
+  quality and taste calls included (R124), stay with people, construction
+  (`labels-by: construction`) or a rule (`labels-by: rule`); `labels-by:`
+  absent means people.
+- `blind: yes`: the labeller sees each output with no judge verdict and no
+  arm name.
+- `anchors: <n>`, `anchor-pass: <k>` and `anchors-digest: <hex>`:
+  known-answer anchors, items whose label is fixed by construction, frozen
+  with the plan; how many the labeller must answer right before any of its
+  labels count; and the digest `gstack-eval-plan anchors --hash <file>`
+  prints for the frozen `{"id", "expected"}` rows.
+
+`judge --check --anchors <file>` scores the labeller's `{"id", "expected",
+"label"}` answers first (`JUDGE_ANCHORS:`); a "can't tell" is a miss, and
+ids or expected answers that don't hash to `anchors-digest:` are refused. The
+results file then carries `judge checked against <model>, a third model, not
+against people`, which `judge --check` prints as `JUDGE_RESULTS_LINE:`.
+Why the anchors are required: on the /cso check, Neon answered yes on only 1
+to 2 of 12 oracle anchors and "can't tell" on 25 to 32 of 104 reports while
+agreeing on the reports it did answer. Agreement alone hid that; the anchors
+caught it.
 
 ## Running evals as an agent: detach
 

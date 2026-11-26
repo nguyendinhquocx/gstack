@@ -11,15 +11,15 @@ Token counts are offline estimates (estimate: calibrated bytes/token per content
 | hurts | 0 |
 | untested, with a plan | 17 |
 | untested, plan none | 48 |
-| safety | 5 |
+| safety | 4 |
 
 ## Parts by load per run
 
-Load per run: a skill's SKILL.md plus the files it must read on every use (`perInvocationTokens` in lib/context-bill.ts); a shared part's files. Tier 2+ skills also read the shared preamble once per session (its own row). On demand: the skill's other sections/ and references/ files, read when a step asks for them; files a shared row also counts, such as /ship's review sections, appear in both. Always-on: frontmatter every session's skill scanner reads.
+Load per run: a skill's SKILL.md plus the files it must read on every use (`perInvocationTokens` in lib/context-bill.ts); a shared part's files. Tier 2+ skills also read the shared preamble once per session (its own row). On demand: the skill's other sections/ and references/ files, read when a step asks for them; files a shared row also counts, such as /gstack-ship's review sections, appear in both. Always-on: frontmatter every session's skill scanner reads.
 
 | Rank | Part | Kind | Load per run (tokens) | On demand (tokens) | Always-on (tokens) | Loads | Status | Source, plan or reason |
 |---|---|---|---|---|---|---|---|---|
-| 1 | ship-review-panel | shared | 23,369 | n/a | n/a | every /ship run, by depth | untested | plan: GEVA-2 registry row R56-1 (org-gstack-gbrain/research/gstack-part-evidence.json registry_rows; proposed, not yet preregistered) (grandfathered) |
+| 1 | ship-review-panel | shared | 23,369 | n/a | n/a | every /gstack-ship run, by depth | untested | plan: GEVA-2 registry row R56-1 (org-gstack-gbrain/research/gstack-part-evidence.json registry_rows; proposed, not yet preregistered) (grandfathered) |
 | 2 | design-review | skill | 20,159 | 7,778 | 101 | every use | untested | plan: GEVA-2 registry row R56-9 (org-gstack-gbrain/research/gstack-part-evidence.json registry_rows; proposed, not yet preregistered) (grandfathered) |
 | 3 | ship | skill | 14,571 | 71,199 | 91 | every use | untested | plan: GEVA-2 registry row R56-4 (org-gstack-gbrain/research/gstack-part-evidence.json registry_rows; proposed, not yet preregistered) (grandfathered) |
 | 4 | plan-ceo-review | skill | 14,394 | 21,203 | 313 | every use | untested | plan: GEVA-2 registry row R56-5 (org-gstack-gbrain/research/gstack-part-evidence.json registry_rows; proposed, not yet preregistered) (grandfathered) |
@@ -64,33 +64,32 @@ Load per run: a skill's SKILL.md plus the files it must read on every use (`perI
 | 43 | pair-agent | skill | 4,824 | 0 | 63 | every use | untested | plan: none (grandfathered) |
 | 44 | make-pdf | skill | 4,730 | 1,767 | 65 | every use | untested | plan: none (grandfathered) |
 | 45 | context-save | skill | 4,637 | 0 | 65 | every use | untested | plan: none (grandfathered) |
-| 46 | cso | skill | 4,456 | 4,759 | 95 | every use | safety | reason: security: supported security findings with explicit coverage; kept on its security reason (GEVA-2 marks it exempt; GStack Minder may reclassify it) |
-| 47 | open-gstack-browser | skill | 4,429 | 0 | 74 | every use | untested | plan: none (grandfathered) |
-| 48 | design-motion | skill | 4,295 | 4,995 | 86 | every use | untested | plan: none (grandfathered) |
-| 49 | test-audit | skill | 4,201 | 0 | 82 | every use | untested | plan: none (grandfathered) |
-| 50 | document-release | skill | 4,049 | 10,260 | 72 | every use | untested | plan: none (grandfathered) |
-| 51 | diagram | skill | 3,895 | 0 | 112 | every use | untested | plan: none (grandfathered) |
-| 52 | benchmark-models | skill | 3,822 | 0 | 77 | every use | untested | plan: none (grandfathered) |
-| 53 | runaway-stopper | skill | 3,693 | 571 | 78 | every use | untested | plan: docs/evals/runaway-stopper-prereg.md (owner GStack Minder (GSTA-36), measure by 2026-11-24) |
-| 54 | ubicloud | skill | 3,676 | 0 | 83 | every use | untested | plan: none (grandfathered) |
-| 55 | modernize | skill | 3,526 | 0 | 94 | every use | untested | plan: none (grandfathered) |
-| 56 | setup-browser-cookies | skill | 3,289 | 0 | 79 | every use | untested | plan: none (grandfathered) |
-| 57 | deslop-shared-libs | skill | 3,100 | 0 | 64 | every use | untested | plan: none (grandfathered) |
-| 58 | landing-report | skill | 2,971 | 0 | 71 | every use | untested | plan: none (grandfathered) |
-| 59 | ship-docs-audit | shared | 2,730 | n/a | n/a | every /ship run | untested | plan: folded into GEVA-2 registry row R56-4 (ship); proposed, not yet preregistered (grandfathered) |
-| 60 | verify | skill | 2,678 | 0 | 91 | every use | untested | plan: none (grandfathered) |
-| 61 | ios-design-review | skill | 2,367 | 0 | 76 | every use | untested | plan: none (grandfathered) |
-| 62 | ios-sync | skill | 2,240 | 0 | 90 | every use | untested | plan: none (grandfathered) |
-| 63 | ios-clean | skill | 2,214 | 0 | 86 | every use | untested | plan: none (grandfathered) |
-| 64 | write-skill | skill | 2,158 | 795 | 100 | every use | untested | plan: none (grandfathered) |
-| 65 | ios-fix | skill | 2,096 | 0 | 69 | every use | untested | plan: none (grandfathered) |
-| 66 | learn | skill | 1,989 | 0 | 66 | every use | untested | plan: none (grandfathered) |
-| 67 | careful | skill | 1,126 | 0 | 171 | every use | safety | reason: safety guard: warns before destructive commands (rm -rf, DROP TABLE, force-push); kept on that reason, an average score cannot see the rare bad run it stops |
-| 68 | freeze | skill | 1,043 | 0 | 234 | every use | safety | reason: safety guard: hard-blocks edits outside one directory; kept on that reason |
-| 69 | guard | skill | 908 | 0 | 348 | every use | safety | reason: safety guard: careful and freeze together; kept on that reason |
-| 70 | capy-factory | shared | 884 | n/a | n/a | every Capy session | untested | plan: none (grandfathered) |
-| 71 | unfreeze | skill | 372 | 0 | 65 | every use | safety | reason: safety guard: the off switch for freeze's edit restriction; kept with the guard it releases |
-| 72 | claude-code | skill | n/a | n/a | n/a | every use | untested | plan: none (grandfathered) |
+| 46 | open-gstack-browser | skill | 4,429 | 0 | 74 | every use | untested | plan: none (grandfathered) |
+| 47 | design-motion | skill | 4,295 | 4,995 | 86 | every use | untested | plan: none (grandfathered) |
+| 48 | test-audit | skill | 4,201 | 0 | 82 | every use | untested | plan: none (grandfathered) |
+| 49 | document-release | skill | 4,049 | 10,260 | 72 | every use | untested | plan: none (grandfathered) |
+| 50 | diagram | skill | 3,895 | 0 | 112 | every use | untested | plan: none (grandfathered) |
+| 51 | benchmark-models | skill | 3,822 | 0 | 77 | every use | untested | plan: none (grandfathered) |
+| 52 | runaway-stopper | skill | 3,693 | 571 | 78 | every use | untested | plan: docs/evals/runaway-stopper-prereg.md (owner GStack Minder (GSTA-36), measure by 2026-11-24) |
+| 53 | ubicloud | skill | 3,676 | 0 | 83 | every use | untested | plan: none (grandfathered) |
+| 54 | modernize | skill | 3,526 | 0 | 94 | every use | untested | plan: none (grandfathered) |
+| 55 | setup-browser-cookies | skill | 3,289 | 0 | 79 | every use | untested | plan: none (grandfathered) |
+| 56 | deslop-shared-libs | skill | 3,100 | 0 | 64 | every use | untested | plan: none (grandfathered) |
+| 57 | landing-report | skill | 2,971 | 0 | 71 | every use | untested | plan: none (grandfathered) |
+| 58 | ship-docs-audit | shared | 2,730 | n/a | n/a | every /gstack-ship run | untested | plan: folded into GEVA-2 registry row R56-4 (ship); proposed, not yet preregistered (grandfathered) |
+| 59 | verify | skill | 2,678 | 0 | 91 | every use | untested | plan: none (grandfathered) |
+| 60 | ios-design-review | skill | 2,367 | 0 | 76 | every use | untested | plan: none (grandfathered) |
+| 61 | ios-sync | skill | 2,240 | 0 | 90 | every use | untested | plan: none (grandfathered) |
+| 62 | ios-clean | skill | 2,214 | 0 | 86 | every use | untested | plan: none (grandfathered) |
+| 63 | write-skill | skill | 2,158 | 795 | 100 | every use | untested | plan: none (grandfathered) |
+| 64 | ios-fix | skill | 2,096 | 0 | 69 | every use | untested | plan: none (grandfathered) |
+| 65 | learn | skill | 1,989 | 0 | 66 | every use | untested | plan: none (grandfathered) |
+| 66 | careful | skill | 1,126 | 0 | 171 | every use | safety | reason: safety guard: warns before destructive commands (rm -rf, DROP TABLE, force-push); kept on that reason, an average score cannot see the rare bad run it stops |
+| 67 | freeze | skill | 1,043 | 0 | 234 | every use | safety | reason: safety guard: hard-blocks edits outside one directory; kept on that reason |
+| 68 | guard | skill | 908 | 0 | 348 | every use | safety | reason: safety guard: careful and freeze together; kept on that reason |
+| 69 | capy-factory | shared | 884 | n/a | n/a | every Capy session | untested | plan: none (grandfathered) |
+| 70 | unfreeze | skill | 372 | 0 | 65 | every use | safety | reason: safety guard: the off switch for freeze's edit restriction; kept with the guard it releases |
+| 71 | claude-code | skill | n/a | n/a | n/a | every use | untested | plan: none (grandfathered) |
 
 ## Measure next
 
@@ -144,25 +143,25 @@ Untested parts, largest load per run first. A fair test runs the claude_code pre
 | 44 | open-gstack-browser | 4,429 | none (grandfathered) |
 | 45 | design-motion | 4,295 | none (grandfathered) |
 | 46 | test-audit | 4,201 | none (grandfathered) |
-| 47 | document-release | 4,049 | none (grandfathered) |
-| 48 | diagram | 3,895 | none (grandfathered) |
-| 49 | benchmark-models | 3,822 | none (grandfathered) |
-| 50 | runaway-stopper | 3,693 | docs/evals/runaway-stopper-prereg.md (owner GStack Minder (GSTA-36), measure by 2026-11-24) |
-| 51 | ubicloud | 3,676 | none (grandfathered) |
-| 52 | modernize | 3,526 | none (grandfathered) |
-| 53 | setup-browser-cookies | 3,289 | none (grandfathered) |
-| 54 | deslop-shared-libs | 3,100 | none (grandfathered) |
-| 55 | landing-report | 2,971 | none (grandfathered) |
-| 56 | ship-docs-audit | 2,730 | folded into GEVA-2 registry row R56-4 (ship); proposed, not yet preregistered (grandfathered) |
-| 57 | verify | 2,678 | none (grandfathered) |
-| 58 | ios-design-review | 2,367 | none (grandfathered) |
-| 59 | ios-sync | 2,240 | none (grandfathered) |
-| 60 | ios-clean | 2,214 | none (grandfathered) |
-| 61 | write-skill | 2,158 | none (grandfathered) |
-| 62 | ios-fix | 2,096 | none (grandfathered) |
-| 63 | learn | 1,989 | none (grandfathered) |
-| 64 | capy-factory | 884 | none (grandfathered) |
-| 65 | claude-code | n/a | none (grandfathered) |
+| 46 | document-release | 4,049 | none (grandfathered) |
+| 47 | diagram | 3,895 | none (grandfathered) |
+| 48 | benchmark-models | 3,822 | none (grandfathered) |
+| 49 | runaway-stopper | 3,693 | docs/evals/runaway-stopper-prereg.md (owner GStack Minder (GSTA-36), measure by 2026-11-24) |
+| 50 | ubicloud | 3,676 | none (grandfathered) |
+| 51 | modernize | 3,526 | none (grandfathered) |
+| 52 | setup-browser-cookies | 3,289 | none (grandfathered) |
+| 53 | deslop-shared-libs | 3,100 | none (grandfathered) |
+| 54 | landing-report | 2,971 | none (grandfathered) |
+| 55 | ship-docs-audit | 2,730 | folded into GEVA-2 registry row R56-4 (ship); proposed, not yet preregistered (grandfathered) |
+| 56 | verify | 2,678 | none (grandfathered) |
+| 57 | ios-design-review | 2,367 | none (grandfathered) |
+| 58 | ios-sync | 2,240 | none (grandfathered) |
+| 59 | ios-clean | 2,214 | none (grandfathered) |
+| 60 | write-skill | 2,158 | none (grandfathered) |
+| 61 | ios-fix | 2,096 | none (grandfathered) |
+| 62 | learn | 1,989 | none (grandfathered) |
+| 63 | capy-factory | 884 | none (grandfathered) |
+| 64 | claude-code | n/a | none (grandfathered) |
 
 ## Shared parts and preamble tiers
 
@@ -172,14 +171,14 @@ Untested parts, largest load per run first. A fair test runs the claude_code pre
 | 2 | canary, captain, context-restore, context-save, design-html, design-motion, design-shotgun, document-generate, document-release, eval-plan, health, investigate, ios-clean, ios-design-review, ios-fix, ios-sync, landing-report, learn, modernize, pair-agent, plan-tune, retro, setup-deploy, setup-gbrain, skillify, sync-gbrain, test-audit, ubicloud, write-skill | the shared sections/preamble.md (row preamble), once per session |
 | 3 | autoplan, claude-code, codex, design-consultation, devex-review, ios-qa, office-hours, plan-ceo-review, plan-design-review, plan-devex-review, plan-eng-review, spec | the shared sections/preamble.md (row preamble), once per session |
 | 4 | design-review, land-and-deploy, qa, qa-only, review, ship | the shared sections/preamble.md (row preamble), once per session |
-| none | careful, cso, deslop-shared-libs, freeze, gstack-upgrade, guard, unfreeze | no preamble |
+| none | careful, deslop-shared-libs, freeze, gstack-upgrade, guard, unfreeze | no preamble |
 
 - **preamble**: shared preamble (sections/preamble.md, identical in every tier 2+ skill) (ship/sections/preamble.md); loads every tier 2+ skill run, inside that skill's load.
 - **catalog**: skill catalog (every skill's frontmatter); loads every session.
 - **capy-skill**: capy/skill/gstack/SKILL.md (capy/skill/gstack/SKILL.md); loads every Capy session.
 - **capy-factory**: capy/skill/gstack/factory.md (capy/skill/gstack/factory.md); loads every Capy session.
-- **ship-review-panel**: /ship review panel (review-army and adversarial sections) (ship/sections/review-army.md, ship/sections/adversarial.md); loads every /ship run, by depth.
-- **ship-docs-audit**: /ship docs audit (Step 14.5) (ship/sections/documentation.md); loads every /ship run.
+- **ship-review-panel**: /gstack-ship review panel (review-army and adversarial sections) (ship/sections/review-army.md, ship/sections/adversarial.md); loads every /gstack-ship run, by depth.
+- **ship-docs-audit**: /gstack-ship docs audit (Step 14.5) (ship/sections/documentation.md); loads every /gstack-ship run.
 - **autoplan-phases**: /autoplan CEO, design, DX and eng phases (autoplan/sections/ceo-phase.md, autoplan/sections/design-phase.md, autoplan/sections/dx-phase.md, autoplan/sections/eng-phase.md); loads every /autoplan run, by scope.
 
 ## Paid dispatches per run
@@ -194,7 +193,7 @@ Each count is quoted from the file and line named; `bin/gstack-inventory --check
 | ship | Step 9 review, pass 1, full depth | the batched specialist on the whole diff and the Red Team always | docs/review-policy.md:301 |
 | ship | targeted reader on money, gate, auth or secret code | +1 at every depth | docs/review-policy.md:449 |
 | ship | audits (Steps 7, 8 and 14.5) | 3 | lib/ship-budget-calibration.json:3 |
-| ship | measured: one /ship child (gstack-evals#31) | 10 review dispatches | lib/ship-budget-calibration.json:43 |
+| ship | measured: one /gstack-ship child (gstack-evals#31) | 10 review dispatches | lib/ship-budget-calibration.json:43 |
 | ship | prior cost of one dispatch on the Capy meter | 7,430,000 tokens | lib/ship-budget-calibration.json:56 |
 | autoplan | voices per phase (native and outside) | 2 | autoplan/DRIVER.md.tmpl:25 |
 | autoplan | phases per round: CEO and Eng always, Design with UI scope, DX with developer-facing scope | 2 to 4, so 4 to 8 voice dispatches a round | autoplan/SKILL.md.tmpl:99 |
@@ -237,7 +236,7 @@ Each count is quoted from the file and line named; `bin/gstack-inventory --check
 
 72 keys: 65 skills (the folders `discoverTemplates()` finds, the root skill as `gstack`) and 7 shared parts.
 
-- Skills: autoplan, benchmark, benchmark-models, browse, canary, captain, careful, claude-code, codex, context-restore, context-save, cso, design-consultation, design-html, design-motion, design-review, design-shotgun, deslop-shared-libs, devex-review, diagram, document-generate, document-release, eval-plan, freeze, gstack, gstack-upgrade, guard, health, investigate, ios-clean, ios-design-review, ios-fix, ios-qa, ios-sync, land-and-deploy, landing-report, learn, make-pdf, modernize, office-hours, open-gstack-browser, pair-agent, plan-ceo-review, plan-design-review, plan-devex-review, plan-eng-review, plan-tune, qa, qa-only, retro, review, runaway-stopper, scrape, setup-browser-cookies, setup-deploy, setup-gbrain, ship, skillify, spec, sync-gbrain, test-audit, ubicloud, unfreeze, verify, write-skill.
+- Skills: autoplan, benchmark, benchmark-models, browse, canary, captain, careful, claude-code, codex, context-restore, context-save, design-consultation, design-html, design-motion, design-review, design-shotgun, deslop-shared-libs, devex-review, diagram, document-generate, document-release, eval-plan, freeze, gstack, gstack-upgrade, guard, health, investigate, ios-clean, ios-design-review, ios-fix, ios-qa, ios-sync, land-and-deploy, landing-report, learn, make-pdf, modernize, office-hours, open-gstack-browser, pair-agent, plan-ceo-review, plan-design-review, plan-devex-review, plan-eng-review, plan-tune, qa, qa-only, retro, review, runaway-stopper, scrape, setup-browser-cookies, setup-deploy, setup-gbrain, ship, skillify, spec, sync-gbrain, test-audit, ubicloud, unfreeze, verify, write-skill.
 - Shared: preamble, catalog, capy-skill, capy-factory, ship-review-panel, ship-docs-audit, autoplan-phases.
 - Installed names: `gstack-<name>` is key `<name>` (`gstack-ship` is `ship`); `gstack-upgrade` keeps its name; the root skill installs as `gstack`.
 - Other names (the ledger's `aliases`): gstack (root skill) → gstack; upgrade → gstack-upgrade; preamble (ceremony) → preamble; always-on skill catalog (descriptions) → catalog; capy/skill/gstack/SKILL.md (Capy context) → capy-skill; capy/skill/gstack/factory.md (Capy context) → capy-factory; ship: review panel (specialist, adversarial, targeted, outside voice, red team) → ship-review-panel; ship: docs audit (Step 14.5) → ship-docs-audit; autoplan: CEO, design, DX and eng phases, outside voice → autoplan-phases.
@@ -246,6 +245,6 @@ Each count is quoted from the file and line named; `bin/gstack-inventory --check
 
 - Out of scope: openclaw/skills/* and browser-skills/* (not gstack skills an agent loads from this checkout), and connect-chrome (a symlink to open-gstack-browser, counted once).
 - Evidence-table row "review: Review Army and adversarial pass": a section inside /review, not its own key; R2 measures it as part of the review row's plan.
-- Evidence-table row "ship: QA probes (Step 9.2.1)": a step inside /ship with no separate size; folded into the ship row (GEVA-2 registry row R56-4).
+- Evidence-table row "ship: QA probes (Step 9.2.1)": a step inside /gstack-ship with no separate size; folded into the ship row (GEVA-2 registry row R56-4).
 - Evidence-table row "gstack as a whole (installed, any skill)": not a single text part; GEVA-2's real-world outcome lane measures it (gstack-evals plan #111), not a measurement plan for any one part.
 - Evidence-table row "untold routing package (route hook, contracts and the description rewrite)": two Claude Code hooks and four description lines, not one text part with a key. L1 (GEVA-2, gstack-evals#247, merged 28be250; Opus 5.5, claude_code preset, 80 SWE-rebench tasks, no-gstack arm, pins 82db89ab → 699a41cb): helps, untold /investigate opens 17/80 vs 0/80, B1 +21.3 [+12.5, +30.0], R48 KEEP; it needs routing or contracts on, and hook vs contracts aren't split; the description rewrite alone had no effect (off-u 0/80). The investigate row carries it as a caveat.

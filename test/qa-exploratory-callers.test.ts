@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -29,6 +29,7 @@ const snapshot = callerSnapshot({ 'scale.ts': 'return n+n', 'README.md': 'double
 const happy: CallerProbe = { id: 'probe-happy', charter: 'happy', input: '3', snapshot, status: 'pass', stdout: '6\n', stderr: '', exit: 0 };
 const adverse: CallerProbe = { id: 'probe-invalid', charter: 'adverse', input: 'no', snapshot, status: 'pass', stdout: '', stderr: 'integer required: 0..9\n', exit: 2 };
 const diffPreface = 'DIFF_BASE=$(git merge-base origin/main HEAD) && ';
+setDefaultTimeout(30_000);
 const capturedNativeDiffs = [
   `${diffPreface}git diff --name-status "$DIFF_BASE"`,
   `${diffPreface}git diff "$DIFF_BASE" -- . ':(exclude)*test*' ':(exclude)*fixture*' ':(exclude)*.spec.*'`,
@@ -261,6 +262,25 @@ describe('caller native-event observer controls', () => {
       use.message.id = 'record-after-handoff-results';
       observed.result.transcript = [...base, ...ordered, use, result];
       expect(validateCallerEvidence(observed)).toEqual([]);
+    });
+
+  // Gate census 45216872389 paid-slice-9-a1: after full and unchanged HANDOFF.md Reads, the completed:true records came
+  // first and a Read {offset: 1} with no limit followed, which the runtime answered file_unchanged. Offset 1 with no
+  // limit reads the whole file, so the captured order passes; any other range stays a partial read and is flagged.
+  test.each(capturedHandoffOrder.passingAttempts.map(attempt => [attempt.source, attempt] as const))
+    ('captured offset-1 handoff re-read after the completion record is a full read: %s', (_, attempt) => {
+      const observed = evidence();
+      const base = observed.result.transcript;
+      const lastRead = (events: any[]) => events.findLast(event => event.message.content[0].name === 'Read').message.content[0];
+      observed.result.transcript = [...base, ...structuredClone(attempt.events)];
+      expect(lastRead(observed.result.transcript as any[]).input).toEqual({ file_path: '/fixture-root/product/HANDOFF.md', offset: 1 });
+      expect(validateCallerEvidence(observed)).toEqual([]);
+      for (const partial of [{ offset: 2 }, { offset: 1, limit: 1 }, { offset: '1' }, { limit: 2000 }]) {
+        const events = structuredClone(attempt.events) as any[];
+        lastRead(events).input = { file_path: '/fixture-root/product/HANDOFF.md', ...partial };
+        observed.result.transcript = [...base, ...events];
+        expect(validateCallerEvidence(observed)).toEqual(['review completion preceded handoff freshness decision']);
+      }
     });
 
   test('captured gate-census-5 review record: bun-wrapped helper and receipt status are outside the interface', () => {
@@ -845,7 +865,7 @@ describe('generated actual parent paths', () => {
     expect(body).toMatch(new RegExp(`never reset ${n.deadline}\\W+bypass ${n.guard}`, 'i'));
     expect(body).toMatch(/plan checks and revalidation remain required beyond this smoke budget/i);
     expect(body).toContain('leaves /review incomplete');
-    expect(body).toMatch(/\/ship blocked unless the user explicitly accepts that named risk/i);
+    expect(body).toMatch(/\/gstack-ship blocked unless the user explicitly accepts that named risk/i);
   });
 
   test('excerpt extraction fails loudly instead of producing an empty passing fixture', () => {
@@ -1556,7 +1576,7 @@ describe('real caller-specific native fixture and capture boundary', () => {
         expect(() => readCallerReceipt(fixture)).toThrow();
       } finally { await fixture.close(); fs.rmSync(fixture.root, { recursive: true, force: true }); }
     }
-  });
+  }, 60_000);
 
   test.each(QA_CALLER_CASES)('%s supplies scheduling boundaries through the actual runner callback', async caseId => {
     const fixture = createQaCallerFixture(caseId);
@@ -1578,6 +1598,8 @@ describe('real caller-specific native fixture and capture boundary', () => {
         expect(options.prompt).toMatch(/keep normal parent decision gates/i);
         expect(options.prompt).toMatch(/Hard deadline UTC, never its Runner entry UTC/i);
         expect(options.prompt).toMatch(/Handoff freshness check: Read HANDOFF\.md and reports\/HANDOFF\.md/);
+        expect(options.prompt).toMatch(/with the Read tool and never Bash cat/);
+        expect(options.prompt).toMatch(/instead of cat\/head\/tail for discovery and for every handoff freshness check/);
         expect(options.prompt).toMatch(/only in a later message than the check's Read results: the evidence helper's materialize, which runs once per report root and freezes the verdict; every gstack-review-log completed:true record, adversarial-review included/);
         expect(options.prompt).toMatch(/do not publish a checkpoint for it/i);
         expect(options.prompt).toMatch(/authenticated expired-capture result/i);

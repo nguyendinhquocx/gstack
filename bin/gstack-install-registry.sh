@@ -350,14 +350,22 @@ gstack_disabled_normalize() {
 # disabled_skills says; an existing gstack-owned entry is removed like a
 # disabled one. investigate's source is gone (GST-1717), and its old entries
 # are still removed. verify is now build-check (#4593): its old gstack-owned
-# entry would hide Claude Code's built-in /verify. Same list as RETIRED_SKILLS in scripts/discover-skills.ts
-# (test/retired-skills.test.ts).
-GSTACK_RETIRED_SKILLS="investigate verify"
+# entry would hide Claude Code's built-in /verify. cso's source is gone
+# (GST-3920), and its old entries are still removed. Same list as
+# RETIRED_SKILLS in scripts/discover-skills.ts (test/retired-skills.test.ts).
+GSTACK_RETIRED_SKILLS="investigate verify cso"
 
 # GSTACK_RENAMED_SKILLS — old:new skill names. A user's disabled_skills entry
 # under an old name still turns off the skill's new name (#4593). Same map as
 # RENAMED_SKILLS in scripts/discover-skills.ts.
 GSTACK_RENAMED_SKILLS="verify:build-check"
+
+# GSTACK_PREFIXED_SKILLS — skills that install as gstack-<folder> in both
+# prefix modes, because a host keeps the plain name for a built-in: Claude
+# Code's own /ship hides a user skill named ship (#4775). The folder, the
+# internal id and disabled_skills keep the plain name. Same list as
+# PREFIXED_SKILLS in scripts/discover-skills.ts.
+GSTACK_PREFIXED_SKILLS="ship"
 
 # gstack_disabled_config VALUE — gstack_disabled_normalize for the user's own
 # disabled_skills value, with each renamed skill mapped to its new name. Only

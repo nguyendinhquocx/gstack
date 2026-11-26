@@ -69,7 +69,7 @@ gstack/
 ├── modernize/       # /modernize skill (aging PR → MODERNIZE / REWORK / CLOSE disposition, range-diff proof, pinned-lease push)
 ├── office-hours/    # /office-hours skill (YC Office Hours — startup diagnostic + builder brainstorm)
 ├── build-check/     # /build-check skill (build-and-verify loop over bin/gstack-checks + lib/checks.ts; tests come from lib/pregate)
-├── spec/            # /spec skill (five-phase spec → GitHub issue, optional agent spawn, /ship auto-closes)
+├── spec/            # /spec skill (five-phase spec → GitHub issue, optional agent spawn, /gstack-ship auto-closes)
 ├── retro/           # Retrospective skill (includes /retro global cross-project mode)
 ├── careful/         # /careful skill; bin/check-careful.sh (PreToolUse destructive-command hook) + bin/hook-extract.sh (shared hook helpers: payload extraction, deny JSON, gstack_hook_state_root)
 ├── freeze/          # /freeze skill; bin/check-freeze.sh (PreToolUse edit-boundary hook; sources careful/bin/hook-extract.sh, fails closed)
@@ -78,7 +78,6 @@ gstack/
 ├── bin/             # CLI utilities (gstack-render.ts = render a local HTML file through Aside or the engine, gstack-design-detect.ts = probe/scan through a user-installed impeccable engine; gstack-design-md.ts = open DESIGN.md check/convert/tokens/mark; gstack-design-lint = the free deterministic design lint over HTML/CSS/components, --render measures in the browser, --scope app measures one app section's spacing (docs/design-lint.md); gstack-design-build = the /design-review --build receipt (preflight, admit, plan, verify-start, receipt, check); gstack-repo-mode, gstack-slug, gstack-config, gstack-wtree, gstack-evidence, gstack-issue-guard, gstack-relink, gstack-memorable, etc.)
 ├── document-release/ # /document-release skill (every-ship pre-verification audit; standalone doc updates + Diataxis coverage map)
 ├── document-generate/ # /document-generate skill (Diataxis doc generator: tutorial/how-to/reference/explanation)
-├── cso/             # /cso skill (OWASP Top 10 + STRIDE security audit)
 ├── design-consultation/ # /design-consultation skill (design system from scratch)
 ├── design-shotgun/  # /design-shotgun skill (visual design exploration)
 ├── design-motion/   # /design-motion skill (showcase loops: deterministic capture, MP4 and GIF exports)
@@ -101,7 +100,7 @@ gstack/
 ├── docs/designs/    # Design documents (incl. IMPECCABLE_INTEROP.md = the design detector / catalog / open DESIGN.md record, and fork-port-residual-2026-09/ evaluation evidence)
 ├── setup-deploy/    # /setup-deploy skill (one-time deploy config)
 ├── .github/         # CI workflows + shared composite actions (.github/actions/) + Docker image (claude CLI pinned)
-│   ├── workflows/   # evals.yml (E2E on Ubicloud), quality-gate.yml (secret scan, CHANGELOG prose lint), dependency-review.yml, osv-scanner.yml, skill-docs.yml, actionlint.yml, plus free-tests, Windows, periodic and marathon evals, CSO release, platform qualification and smaller gates
+│   ├── workflows/   # evals.yml (E2E on Ubicloud), quality-gate.yml (secret scan, CHANGELOG prose lint), dependency-review.yml, osv-scanner.yml, skill-docs.yml, actionlint.yml, plus free-tests, Windows, periodic and marathon evals, platform qualification and smaller gates
 │   └── docker/      # Dockerfile.ci (pre-baked toolchain + Playwright/Chromium)
 ├── contrib/         # Contributor-only tools (never installed for users)
 │   └── add-host/    # /gstack-contrib-add-host skill

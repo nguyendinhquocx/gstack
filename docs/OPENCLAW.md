@@ -44,7 +44,7 @@ OpenClaw decides at spawn time which tier of gstack support to use:
 
 - Can it be done in <10 lines of code? -> **Simple**
 - Does it touch multiple files but the approach is obvious? -> **Medium**
-- Does the user name a specific skill (/cso, /review, /qa)? -> **Heavy**
+- Does the user name a specific skill (/review, /qa)? -> **Heavy**
 - Is it a feature, project, or objective (not a task)? -> **Full**
 - Does the user want to PLAN something for Claude Code without implementing yet? -> **Plan**
 
@@ -87,7 +87,7 @@ A/B tested: 2x time, meaningfully better output.
 1. Read CLAUDE.md and understand the project
 2. Run /autoplan (CEO + eng + design review)
 3. Implement the approved plan
-4. Run /ship to create a PR
+4. Run /gstack-ship to create a PR
 5. Report back with PR URL and decisions
 
 ### gstack-plan (Plan tier)
@@ -146,7 +146,7 @@ the same command line:
 GSTACK_SESSION_KIND=spawned "$_SS" --skill "document-release" ...
 ```
 
-gstack itself uses this: `/ship` Step 14.5 dispatches the `/document-release`
+gstack itself uses this: `/gstack-ship` Step 14.5 dispatches the `/document-release`
 subagent with this prefix before final commit, verification and publication.
 Its ship-owned scope overrides generic spawned auto-choice: risky or uncertain
 documentation changes return as blockers for the parent, without interactive
@@ -166,7 +166,7 @@ repo's `.claude/settings.json` env block, direnv, a CI wrapper) could set
 its confirmation gates to auto-choose. When the env override drives the
 classification, the preamble emits a loud `SPAWNED_OVERRIDE: env` status line
 so the transcript shows WHY the session is spawned — audit
-`.claude/settings.json` env blocks in untrusted repos (/cso covers this).
+`.claude/settings.json` env blocks in untrusted repos.
 
 ## Installation
 

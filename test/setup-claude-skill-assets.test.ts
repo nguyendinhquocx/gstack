@@ -35,9 +35,6 @@ const BUILT_ARTIFACT_ALLOWLIST = [
   'design/dist/',
   'make-pdf/dist/',
   'bin/gstack-global-discover', // compiled from bin/gstack-global-discover.ts at build time
-  'bin/gstack-cso-core',
-  'bin/gstack-cso-launcher',
-  'bin/gstack-cso-watchdog',
 ];
 
 /**
@@ -138,9 +135,9 @@ describe('link_claude_skill_dirs installs every runtime asset (#2317, #2454)', (
   });
 
   test('sections/ still installs for carved skills', () => {
-    expect(fs.existsSync(path.join(installDir, 'ship', 'sections'))).toBe(true);
+    expect(fs.existsSync(path.join(installDir, 'gstack-ship', 'sections'))).toBe(true);
     expect(
-      fs.readdirSync(path.join(installDir, 'ship', 'sections')).length,
+      fs.readdirSync(path.join(installDir, 'gstack-ship', 'sections')).length,
     ).toBeGreaterThan(0);
   });
 
